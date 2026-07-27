@@ -10,22 +10,22 @@ x-app-service: &app-service
     - path: .env
       required: false
   environment:
-    APP_NAME: "Media Downloader"
-    APP_ENV: local
-    APP_DEBUG: "true"
-    APP_URL: https://save.allmy.win
-    APP_LOCALE: en
-    APP_FALLBACK_LOCALE: en
-    APP_TIMEZONE: Europe/Istanbul
-    DB_CONNECTION: sqlite
+    APP_NAME: "${APP_NAME:-Save It}"
+    APP_ENV: "${APP_ENV:-production}"
+    APP_DEBUG: "${APP_DEBUG:-false}"
+    APP_URL: "${APP_URL:-https://save.allmy.win}"
+    APP_LOCALE: "${APP_LOCALE:-en}"
+    APP_FALLBACK_LOCALE: "${APP_FALLBACK_LOCALE:-en}"
+    APP_TIMEZONE: "${APP_TIMEZONE:-Europe/Istanbul}"
+    DB_CONNECTION: "${DB_CONNECTION:-sqlite}"
     DB_DATABASE: /var/www/html/database/database.sqlite
     REDIS_HOST: redis
-    REDIS_PORT: "6379"
-    CACHE_STORE: redis
-    QUEUE_CONNECTION: redis
-    SESSION_DRIVER: redis
-    SESSION_CONNECTION: default
-    LOG_CHANNEL: stderr
+    REDIS_PORT: "${REDIS_PORT:-6379}"
+    CACHE_STORE: "${CACHE_STORE:-redis}"
+    QUEUE_CONNECTION: "${QUEUE_CONNECTION:-redis}"
+    SESSION_DRIVER: "${SESSION_DRIVER:-redis}"
+    SESSION_CONNECTION: "${SESSION_CONNECTION:-default}"
+    LOG_CHANNEL: "${LOG_CHANNEL:-stderr}"
   volumes:
     - ./database:/var/www/html/database
     - ./storage:/var/www/html/storage

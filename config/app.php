@@ -13,7 +13,7 @@ return [
     |
     */
 
-    'name' => env('APP_NAME', 'Media Downloader'),
+    'name' => env('APP_NAME', 'Save It'),
 
     /*
     |--------------------------------------------------------------------------

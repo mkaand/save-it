@@ -1,5 +1,17 @@
 FROM composer:2 AS composer
 
+FROM node:22-bookworm-slim AS frontend
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY vite.config.js ./
+COPY resources ./resources
+COPY public ./public
+RUN npm run build
+
 FROM php:8.2-fpm-bookworm
 
 ARG APP_UID=1000
@@ -37,6 +49,7 @@ RUN composer install \
     --optimize-autoloader
 
 COPY . .
+COPY --from=frontend /app/public/build ./public/build
 COPY docker/php/php.ini /usr/local/etc/php/conf.d/99-media-downloader.ini
 COPY docker/php/entrypoint.sh /usr/local/bin/media-downloader-entrypoint
 

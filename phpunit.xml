@@ -19,6 +19,8 @@
     </source>
     <php>
         <env name="APP_ENV" value="testing"/>
+        <env name="APP_NAME" value="Save It"/>
+        <env name="APP_DEBUG" value="false"/>
         <env name="APP_KEY" value="00000000000000000000000000000000"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
