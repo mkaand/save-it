@@ -6,26 +6,42 @@ use Tests\TestCase;
 
 class FoundationTest extends TestCase
 {
-    public function test_landing_page_returns_http_200(): void
+    protected function setUp(): void
     {
-        $this->get('/')->assertOk();
+        parent::setUp();
+
+        $this->withoutVite();
     }
 
-    public function test_landing_page_contains_application_name(): void
+    public function test_landing_page_contains_the_save_it_experience(): void
     {
-        $this->get('/')->assertSee('Media Downloader');
+        $this->get('/')
+            ->assertOk()
+            ->assertSee('Save It')
+            ->assertSee('Download media.')
+            ->assertSee('data-analyzer-form', false)
+            ->assertSee('YouTube Shorts')
+            ->assertSee('LinkedIn')
+            ->assertSee('Beta')
+            ->assertSee('data-recent-section', false)
+            ->assertDontSee('Login')
+            ->assertDontSee('Register');
     }
 
-    public function test_health_endpoint_returns_http_200(): void
+    public function test_health_endpoint_is_safe_and_stateless(): void
     {
-        $this->getJson('/health')->assertOk();
-    }
+        $response = $this->getJson('/health');
 
-    public function test_health_endpoint_returns_expected_json(): void
-    {
-        $this->getJson('/health')->assertExactJson([
-            'status' => 'ok',
-            'application' => 'Media Downloader',
-        ]);
+        $response
+            ->assertOk()
+            ->assertHeader('Content-Type', 'application/json')
+            ->assertHeaderMissing('Set-Cookie')
+            ->assertExactJson([
+                'status' => 'ok',
+                'application' => 'Save It',
+            ]);
+
+        $this->assertStringNotContainsString('APP_KEY', $response->getContent());
+        $this->assertStringNotContainsString('debug', strtolower($response->getContent()));
     }
 }

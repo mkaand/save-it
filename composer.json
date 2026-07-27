@@ -2,7 +2,7 @@
     "$schema": "https://getcomposer.org/schema.json",
     "name": "allmywin/media-downloader",
     "type": "project",
-    "description": "Laravel foundation for the Media Downloader application.",
+    "description": "Save It media URL analysis and download experience.",
     "keywords": ["laravel", "framework"],
     "license": "MIT",
     "require": {
