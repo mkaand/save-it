@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme-mode="system">
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="description" content="Analyze supported media URLs and preview planned download formats with Save It. No account required.">
     <meta name="theme-color" content="#0b1220">
     <meta property="og:title" content="Save It — Download media. Keep it simple.">
@@ -12,6 +12,24 @@
     <link rel="canonical" href="https://save.allmy.win/">
     <link rel="icon" href="/favicon.ico" sizes="any">
     <title>Save It — Simple media downloads</title>
+    <script>
+        (() => {
+            try {
+                const key = 'save-it.theme.v1';
+                const stored = localStorage.getItem(key);
+                const mode = ['light', 'dark'].includes(stored) ? stored : 'system';
+                if (stored && mode === 'system') localStorage.removeItem(key);
+                const theme = mode === 'system'
+                    ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+                    : mode;
+                document.documentElement.dataset.theme = theme;
+                document.documentElement.dataset.themeMode = mode;
+                document.documentElement.style.colorScheme = theme;
+            } catch {
+                document.documentElement.dataset.theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+            }
+        })();
+    </script>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
 <body>
@@ -20,29 +38,51 @@
     <header class="site-header" data-site-header>
         <div class="shell header-inner">
             <a class="brand" href="#top" aria-label="Save It home">
-                <span class="brand-mark" aria-hidden="true">
-                    <span></span>
-                </span>
+                <span class="brand-mark" aria-hidden="true"><span></span></span>
                 <span>Save It</span>
             </a>
-
-            <button
-                class="nav-toggle"
-                type="button"
-                aria-expanded="false"
-                aria-controls="site-navigation"
-                data-nav-toggle
-            >
-                <span class="sr-only">Toggle navigation</span>
-                <span aria-hidden="true"></span>
-                <span aria-hidden="true"></span>
-            </button>
 
             <nav class="site-nav" id="site-navigation" aria-label="Primary navigation" data-site-nav>
                 <a href="#platforms">Platforms</a>
                 <a href="#how-it-works">How it works</a>
                 <a href="#privacy">Privacy</a>
             </nav>
+
+            <div class="header-actions">
+                <div class="theme-control" aria-label="Theme controls">
+                    <button
+                        class="theme-toggle"
+                        type="button"
+                        role="switch"
+                        aria-checked="false"
+                        aria-label="Switch to light theme"
+                        data-theme-toggle
+                    >
+                        <span class="theme-sun" aria-hidden="true">☀</span>
+                        <span class="theme-toggle-track" aria-hidden="true"><span></span></span>
+                        <span class="theme-moon" aria-hidden="true">☾</span>
+                    </button>
+                    <button
+                        class="theme-system"
+                        type="button"
+                        aria-pressed="true"
+                        aria-label="Use system theme"
+                        data-theme-system
+                    >System</button>
+                </div>
+
+                <button
+                    class="nav-toggle"
+                    type="button"
+                    aria-expanded="false"
+                    aria-controls="site-navigation"
+                    data-nav-toggle
+                >
+                    <span class="sr-only">Toggle navigation</span>
+                    <span aria-hidden="true"></span>
+                    <span aria-hidden="true"></span>
+                </button>
+            </div>
         </div>
     </header>
 
@@ -53,17 +93,17 @@
 
             <div class="shell hero-grid">
                 <div class="hero-copy">
-                    <p class="eyebrow"><span></span> Simple by design. Private by default.</p>
+                    <p class="eyebrow"><span></span> Fast preview. Less noise.</p>
                     <h1>Download media.<br><em>Keep it simple.</em></h1>
                     <p class="hero-lead">
-                        Paste a supported media URL, analyze the format plan, and choose what you need.
+                        Paste a recognized media link, preview the format plan, and choose what you need.
                         No account required.
                     </p>
 
                     <ul class="hero-points" aria-label="Save It benefits">
-                        <li><span aria-hidden="true">✓</span> Fast URL analysis</li>
-                        <li><span aria-hidden="true">✓</span> Clear format previews</li>
-                        <li><span aria-hidden="true">✓</span> Browser-local history</li>
+                        <li><span aria-hidden="true">✓</span> Fast analysis</li>
+                        <li><span aria-hidden="true">✓</span> Clear previews</li>
+                        <li><span aria-hidden="true">✓</span> Local recents</li>
                     </ul>
                 </div>
 
@@ -95,7 +135,7 @@
                             >
                             <button class="paste-button" type="button" hidden data-paste-button>Paste</button>
                         </div>
-                        <p class="field-help" id="url-help">HTTP and HTTPS links from a listed platform are accepted.</p>
+                        <p class="field-help" id="url-help">Use an HTTP or HTTPS link from the platform roadmap.</p>
                         <p class="field-error" id="url-error" role="alert" data-url-error hidden></p>
 
                         <button class="analyze-button" type="submit" data-analyze-button>
@@ -117,45 +157,45 @@
                 <div class="section-heading platform-heading">
                     <div>
                         <p class="eyebrow"><span></span> Platform roadmap</p>
-                        <h2 id="platform-heading">Built for the links you use.</h2>
+                        <h2 id="platform-heading">Recognized links, honest status.</h2>
                     </div>
-                    <p>URL recognition is ready today. Download availability expands with the media engine.</p>
+                    <p>URL recognition is available now. Real extraction and downloads arrive with the media engine.</p>
                 </div>
 
                 <div class="platform-grid">
                     <article class="platform-card is-primary">
-                        <span class="platform-monogram" aria-hidden="true">YT</span>
-                        <div><h3>YouTube</h3><p>Videos and compatible format planning</p></div>
+                        <span class="platform-icon-slot" data-platform-icon="youtube" aria-hidden="true">YT</span>
+                        <div><h3>YouTube</h3><p>Video URL preview</p></div>
                         <span class="status-badge status-mvp">MVP</span>
                     </article>
                     <article class="platform-card is-primary">
-                        <span class="platform-monogram" aria-hidden="true">YS</span>
-                        <div><h3>YouTube Shorts</h3><p>Short-form URL detection</p></div>
+                        <span class="platform-icon-slot" data-platform-icon="youtube_shorts" aria-hidden="true">YS</span>
+                        <div><h3>YouTube Shorts</h3><p>Short-form detection</p></div>
                         <span class="status-badge status-mvp">MVP</span>
                     </article>
                     <article class="platform-card">
-                        <span class="platform-monogram" aria-hidden="true">IG</span>
-                        <div><h3>Instagram</h3><p>URL analysis foundation</p></div>
+                        <span class="platform-icon-slot" data-platform-icon="instagram" aria-hidden="true">IG</span>
+                        <div><h3>Instagram</h3><p>Recognition only</p></div>
                         <span class="status-badge">Planned</span>
                     </article>
                     <article class="platform-card">
-                        <span class="platform-monogram" aria-hidden="true">TT</span>
-                        <div><h3>TikTok</h3><p>URL analysis foundation</p></div>
+                        <span class="platform-icon-slot" data-platform-icon="tiktok" aria-hidden="true">TT</span>
+                        <div><h3>TikTok</h3><p>Recognition only</p></div>
                         <span class="status-badge">Planned</span>
                     </article>
                     <article class="platform-card">
-                        <span class="platform-monogram" aria-hidden="true">X</span>
-                        <div><h3>X</h3><p>URL analysis foundation</p></div>
+                        <span class="platform-icon-slot" data-platform-icon="x" aria-hidden="true">X</span>
+                        <div><h3>X</h3><p>Recognition only</p></div>
                         <span class="status-badge">Planned</span>
                     </article>
                     <article class="platform-card">
-                        <span class="platform-monogram" aria-hidden="true">FB</span>
-                        <div><h3>Facebook</h3><p>URL analysis foundation</p></div>
+                        <span class="platform-icon-slot" data-platform-icon="facebook" aria-hidden="true">FB</span>
+                        <div><h3>Facebook</h3><p>Recognition only</p></div>
                         <span class="status-badge">Planned</span>
                     </article>
                     <article class="platform-card">
-                        <span class="platform-monogram" aria-hidden="true">in</span>
-                        <div><h3>LinkedIn</h3><p>Early URL analysis support</p></div>
+                        <span class="platform-icon-slot" data-platform-icon="linkedin" aria-hidden="true">in</span>
+                        <div><h3>LinkedIn</h3><p>Early URL preview</p></div>
                         <span class="status-badge status-beta">Beta</span>
                     </article>
                 </div>
@@ -184,37 +224,23 @@
                     </div>
                     <button class="text-button" type="button" data-clear-recent>Clear all</button>
                 </div>
-                <p class="recent-intro">Your five latest successful analyses stay on this device.</p>
                 <div class="recent-grid" data-recent-list></div>
             </div>
         </section>
 
         <section class="steps-section" id="how-it-works" aria-labelledby="steps-heading">
-            <div class="shell">
-                <div class="section-heading centered-heading">
-                    <p class="eyebrow"><span></span> A straightforward flow</p>
-                    <h2 id="steps-heading">From link to format plan in three steps.</h2>
+            <div class="shell steps-layout">
+                <div class="section-heading steps-heading">
+                    <div>
+                        <p class="eyebrow"><span></span> How it works</p>
+                        <h2 id="steps-heading">Three clear steps.</h2>
+                    </div>
                 </div>
 
                 <ol class="steps-grid">
-                    <li>
-                        <span class="step-number">01</span>
-                        <span class="step-icon" aria-hidden="true">⌁</span>
-                        <h3>Paste</h3>
-                        <p>Add a URL from one of the recognized platforms.</p>
-                    </li>
-                    <li>
-                        <span class="step-number">02</span>
-                        <span class="step-icon" aria-hidden="true">◎</span>
-                        <h3>Analyze</h3>
-                        <p>Save It validates the link and prepares a safe preview.</p>
-                    </li>
-                    <li>
-                        <span class="step-number">03</span>
-                        <span class="step-icon" aria-hidden="true">↓</span>
-                        <h3>Choose</h3>
-                        <p>Review planned formats. Real downloads arrive with the media engine.</p>
-                    </li>
+                    <li><span class="step-number">01</span><div><h3>Paste</h3><p>Add a recognized platform URL.</p></div></li>
+                    <li><span class="step-number">02</span><div><h3>Analyze</h3><p>Validate it and prepare a safe preview.</p></div></li>
+                    <li><span class="step-number">03</span><div><h3>Choose</h3><p>Review planned formats. Downloads are not active yet.</p></div></li>
                 </ol>
             </div>
         </section>
@@ -222,32 +248,31 @@
         <section class="privacy-section" id="privacy" aria-labelledby="privacy-heading">
             <div class="shell privacy-grid">
                 <div class="privacy-copy">
-                    <p class="eyebrow light-eyebrow"><span></span> Clear privacy choices</p>
-                    <h2 id="privacy-heading">Your recent links stay close.</h2>
+                    <p class="eyebrow"><span></span> Privacy, explained</p>
+                    <h2 id="privacy-heading">No account. Browser-local recents.</h2>
                     <p>
-                        Save It does not require an account. URL analysis is sent to the application server,
-                        while Recent Fetches remain in this browser and are never synced between devices.
+                        URL analysis is sent to the application server. Your five recent previews stay in this browser,
+                        are not synced, and can be cleared whenever you choose.
                     </p>
-                    <p>You can clear browser-local history at any time.</p>
                 </div>
-                <ul class="privacy-list">
-                    <li><span aria-hidden="true">01</span><div><strong>No account</strong><p>Analyze without creating a profile.</p></div></li>
-                    <li><span aria-hidden="true">02</span><div><strong>Local recents</strong><p>Only minimal preview details are stored locally.</p></div></li>
-                    <li><span aria-hidden="true">03</span><div><strong>In your control</strong><p>Clear your recent list whenever you choose.</p></div></li>
-                </ul>
+                <details class="privacy-details">
+                    <summary>What stays in this browser?</summary>
+                    <div>
+                        <p>Only minimal preview details such as platform, title, URL, thumbnail, and analysis time.</p>
+                        <p>Save It does not promise absolute anonymity or claim that server logs do not exist.</p>
+                    </div>
+                </details>
             </div>
         </section>
     </main>
 
     <footer class="site-footer">
         <div class="shell footer-inner">
-            <div>
-                <a class="brand footer-brand" href="#top">
-                    <span class="brand-mark" aria-hidden="true"><span></span></span>
-                    <span>Save It</span>
-                </a>
-                <p>Simple media analysis, with less noise.</p>
-            </div>
+            <a class="brand footer-brand" href="#top">
+                <span class="brand-mark" aria-hidden="true"><span></span></span>
+                <span>Save It</span>
+            </a>
+            <p>Simple media analysis, with less noise.</p>
             <nav aria-label="Footer navigation">
                 <a href="#platforms">Platforms</a>
                 <a href="#how-it-works">How it works</a>

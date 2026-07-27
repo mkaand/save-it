@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up PHP 8.2
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: bcmath, mbstring, pdo_sqlite, pcntl, redis, sqlite3, zip
+          coverage: none
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install PHP dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Validate Composer metadata
+        run: composer validate --strict
+
+      - name: Audit PHP dependencies
+        run: composer audit
+
+      - name: Run Laravel tests
+        run: php artisan test
+
+      - name: Check PHP formatting
+        run: vendor/bin/pint --test
+
+      - name: Run JavaScript tests
+        run: npm run test:js
+
+      - name: Audit production frontend dependencies
+        run: npm audit --omit=dev
+
+      - name: Build frontend assets
+        run: npm run build
+
+      - name: Validate Docker Compose
+        run: docker compose config
+
+      - name: Build immutable app and Nginx images
+        run: docker compose build app nginx
+
+      - name: Verify image manifests match
+        run: |
+          app_sha="$(docker run --rm --entrypoint sha256sum media-downloader-app:local /var/www/html/public/build/manifest.json | cut -d' ' -f1)"
+          nginx_sha="$(docker run --rm --entrypoint sha256sum media-downloader-nginx:local /var/www/html/public/build/manifest.json | cut -d' ' -f1)"
+          test "$app_sha" = "$nginx_sha"

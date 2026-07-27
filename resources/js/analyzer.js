@@ -3,6 +3,10 @@ import {
     clearRecentFetches,
     readRecentFetches,
 } from './recent-fetches.js';
+import {
+    mountPlatformIcons,
+    platformIcon,
+} from './platform-icons.js';
 
 function browserStorage() {
     try {
@@ -55,16 +59,40 @@ function initNavigation() {
         return;
     }
 
-    toggle.addEventListener('click', () => {
-        const open = toggle.getAttribute('aria-expanded') !== 'true';
+    function setOpen(open, returnFocus = false) {
         toggle.setAttribute('aria-expanded', String(open));
         navigation.classList.toggle('is-open', open);
+
+        if (open) {
+            navigation.querySelector('a')?.focus();
+        } else if (returnFocus) {
+            toggle.focus();
+        }
+    }
+
+    toggle.addEventListener('click', () => {
+        setOpen(toggle.getAttribute('aria-expanded') !== 'true');
     });
 
     navigation.addEventListener('click', (event) => {
         if (event.target.closest('a')) {
-            toggle.setAttribute('aria-expanded', 'false');
-            navigation.classList.remove('is-open');
+            setOpen(false);
+        }
+    });
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && toggle.getAttribute('aria-expanded') === 'true') {
+            setOpen(false, true);
+        }
+    });
+
+    document.addEventListener('click', (event) => {
+        if (
+            toggle.getAttribute('aria-expanded') === 'true'
+            && !navigation.contains(event.target)
+            && !toggle.contains(event.target)
+        ) {
+            setOpen(false);
         }
     });
 }
@@ -118,8 +146,14 @@ export function initAnalyzer() {
         const media = thumbnail(data.thumbnail_url, data.title, 'result-media');
         const copy = element('div', 'result-copy');
         const meta = element('div', 'result-meta');
+        const platform = element('span', 'result-pill result-platform');
+        const icon = platformIcon(data.platform, 'platform-logo result-platform-logo');
+        if (icon) {
+            platform.append(icon);
+        }
+        platform.append(document.createTextNode(data.platform_label));
         meta.append(
-            element('span', 'result-pill', data.platform_label),
+            platform,
             element('span', 'result-pill', data.media_type.replaceAll('_', ' ')),
             element('span', 'result-pill', data.status),
         );
@@ -152,7 +186,10 @@ export function initAnalyzer() {
         );
         resultPanel.append(media, copy);
         resultSection.hidden = false;
-        resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        resultSection.scrollIntoView({
+            behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+            block: 'start',
+        });
     }
 
     function renderRecent() {
@@ -167,10 +204,13 @@ export function initAnalyzer() {
             select.append(thumbnail(item.thumbnailUrl, item.title, 'recent-thumb'));
 
             const body = element('div', 'recent-body');
-            body.append(
-                element('span', 'recent-platform', item.platformLabel),
-                element('h3', '', item.title),
-            );
+            const platform = element('span', 'recent-platform');
+            const icon = platformIcon(item.platform, 'platform-logo recent-platform-logo');
+            if (icon) {
+                platform.append(icon);
+            }
+            platform.append(document.createTextNode(item.platformLabel));
+            body.append(platform, element('h3', '', item.title));
             const url = element('p', 'recent-url', item.url);
             url.title = item.url;
             body.append(url, element('time', 'recent-time', new Intl.DateTimeFormat(undefined, {
@@ -303,6 +343,7 @@ export function initAnalyzer() {
 }
 
 export function initPage() {
+    mountPlatformIcons();
     initNavigation();
     initAnalyzer();
 

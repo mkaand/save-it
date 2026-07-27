@@ -20,10 +20,16 @@ class FoundationTest extends TestCase
             ->assertSee('Save It')
             ->assertSee('Download media.')
             ->assertSee('data-analyzer-form', false)
+            ->assertSee('data-theme-toggle', false)
+            ->assertSee('data-theme-system', false)
+            ->assertSee('save-it.theme.v1', false)
+            ->assertSee('data-platform-icon="youtube"', false)
+            ->assertSee('data-platform-icon="linkedin"', false)
             ->assertSee('YouTube Shorts')
             ->assertSee('LinkedIn')
             ->assertSee('Beta')
             ->assertSee('data-recent-section', false)
+            ->assertSee('<details class="privacy-details">', false)
             ->assertDontSee('Login')
             ->assertDontSee('Register');
     }
