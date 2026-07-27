@@ -12,7 +12,7 @@ COPY resources ./resources
 COPY public ./public
 RUN npm run build
 
-FROM php:8.2-fpm-bookworm
+FROM php:8.2-fpm-bookworm AS app
 
 ARG APP_UID=1000
 ARG APP_GID=1000
@@ -58,7 +58,8 @@ RUN rm -f bootstrap/cache/*.php \
         --no-dev \
         --no-interaction \
         --optimize \
-    && chmod 0755 /usr/local/bin/media-downloader-entrypoint \
+    && chmod -R a+rX app bootstrap config public resources routes \
+    && chmod 0755 /usr/local/bin/media-downloader-entrypoint artisan \
     && mkdir -p \
         bootstrap/cache \
         database \
@@ -72,3 +73,12 @@ RUN rm -f bootstrap/cache/*.php \
 
 ENTRYPOINT ["media-downloader-entrypoint"]
 CMD ["php-fpm"]
+
+FROM nginx:1.28-alpine AS nginx
+
+COPY docker/nginx/default.conf /etc/nginx/conf.d/default.conf
+COPY public /var/www/html/public
+COPY --from=frontend /app/public/build /var/www/html/public/build
+
+RUN find /var/www/html/public -type d -exec chmod 0755 {} + \
+    && find /var/www/html/public -type f -exec chmod 0644 {} +

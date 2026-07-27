@@ -4,6 +4,7 @@ x-app-service: &app-service
   build:
     context: .
     dockerfile: docker/php/Dockerfile
+    target: app
   image: media-downloader-app:local
   restart: unless-stopped
   env_file:
@@ -49,14 +50,15 @@ services:
       start_period: 10s
 
   nginx:
-    image: nginx:1.28-alpine
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+      target: nginx
+    image: media-downloader-nginx:local
     container_name: media-downloader-nginx
     restart: unless-stopped
     ports:
       - "127.0.0.1:8099:80"
-    volumes:
-      - ./public:/var/www/html/public:ro
-      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
     networks:
       - internal
     depends_on:
