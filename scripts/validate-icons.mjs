@@ -36,11 +36,21 @@ for (const [relativePath, size] of expectedImages) {
     assert.equal(metadata.height, size, `${relativePath} height`);
 }
 
+const socialSource = await readFile(
+    path.join(root, 'public/social/save-it-social-card-v2.svg'),
+    'utf8',
+);
+assert.equal(socialSource.includes('<text'), false, 'Social preview must use glyph paths.');
+assert.match(socialSource, /aria-label="Save It"/);
+assert.match(socialSource, /aria-label="Download media\. Keep it simple\."/);
+assert.match(socialSource, /aria-label="save\.allmy\.win"/);
+
 const social = await sharp(
-    path.join(root, 'public/social/save-it-social-card.png'),
+    path.join(root, 'public/social/save-it-social-card-v2.png'),
 ).metadata();
 assert.equal(social.width, 1200, 'Social preview width');
 assert.equal(social.height, 630, 'Social preview height');
+assert.equal(social.format, 'png', 'Social preview format');
 
 const ico = await readFile(path.join(root, 'public/favicon.ico'));
 assert.ok(ico.length > 100, 'favicon.ico must not be empty.');

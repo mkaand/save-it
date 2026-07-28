@@ -29,6 +29,8 @@ class FoundationTest extends TestCase
             ->assertSee('LinkedIn')
             ->assertSee('Beta')
             ->assertSee('data-recent-section', false)
+            ->assertSee('data-youtube-extractor-available', false)
+            ->assertSee('data-youtube-shorts-extractor-available', false)
             ->assertSee('data-instagram-extractor-available', false)
             ->assertSee('<details class="privacy-details">', false)
             ->assertDontSee('Login')
@@ -95,7 +97,7 @@ class FoundationTest extends TestCase
         $this->get('/')
             ->assertOk()
             ->assertSee('property="og:image"', false)
-            ->assertSee('content="https://save.allmy.win/social/save-it-social-card.png"', false)
+            ->assertSee('content="https://save.allmy.win/social/save-it-social-card-v2.png"', false)
             ->assertSee('name="twitter:card" content="summary_large_image"', false)
             ->assertSee('name="twitter:title"', false)
             ->assertSee('name="twitter:description"', false)
@@ -103,6 +105,8 @@ class FoundationTest extends TestCase
             ->assertSee('rel="canonical" href="https://save.allmy.win/"', false);
 
         $this->assertFileExists(public_path('social/save-it-social-card.png'));
+        $this->assertFileExists(public_path('social/save-it-social-card-v2.png'));
+        $this->assertFileExists(public_path('social/save-it-social-card-v2.svg'));
         $this->assertFileExists(public_path('robots.txt'));
         $this->assertFileExists(public_path('sitemap.xml'));
         $this->assertStringContainsString(
