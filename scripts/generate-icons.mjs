@@ -11,10 +11,13 @@ const sourcePath = path.join(root, 'resources/branding/save-it-mark.svg');
 const publicPath = path.join(root, 'public');
 const brandPath = path.join(publicPath, 'brand');
 const iconsPath = path.join(publicPath, 'icons');
+const socialPath = path.join(publicPath, 'social');
 const source = await readFile(sourcePath);
+const socialSource = await readFile(path.join(root, 'resources/branding/save-it-social-card.svg'));
 
 await mkdir(brandPath, { recursive: true });
 await mkdir(iconsPath, { recursive: true });
+await mkdir(socialPath, { recursive: true });
 await writeFile(path.join(brandPath, 'save-it-mark.svg'), source);
 await writeFile(path.join(publicPath, 'favicon.svg'), source);
 await writeFile(
@@ -61,6 +64,10 @@ const maskable = await sharp({
     .png({ compressionLevel: 9, palette: true })
     .toBuffer();
 await writeFile(path.join(iconsPath, 'icon-maskable-512.png'), maskable);
+await writeFile(
+    path.join(socialPath, 'save-it-social-card.png'),
+    await sharp(socialSource).resize(1200, 630).png({ compressionLevel: 9 }).toBuffer(),
+);
 
 const manifest = {
     name: 'Save It',

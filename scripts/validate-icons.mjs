@@ -36,6 +36,12 @@ for (const [relativePath, size] of expectedImages) {
     assert.equal(metadata.height, size, `${relativePath} height`);
 }
 
+const social = await sharp(
+    path.join(root, 'public/social/save-it-social-card.png'),
+).metadata();
+assert.equal(social.width, 1200, 'Social preview width');
+assert.equal(social.height, 630, 'Social preview height');
+
 const ico = await readFile(path.join(root, 'public/favicon.ico'));
 assert.ok(ico.length > 100, 'favicon.ico must not be empty.');
 

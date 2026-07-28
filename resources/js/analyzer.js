@@ -8,6 +8,10 @@ import {
     platformIcon,
 } from './platform-icons.js';
 import {
+    instagramAssetLabel,
+    normalizeInstagramAssets,
+} from './instagram-result.js';
+import {
     normalizeXAssets,
     safeResultImageUrl,
     xAssetLabel,
@@ -170,7 +174,9 @@ export function initAnalyzer() {
         url.title = data.url;
         const outputLabel = element('p', 'output-label', 'Planned output options');
         const outputs = element('div', 'output-grid');
-        const assets = data.platform === 'x' ? normalizeXAssets(data.assets) : [];
+        const assets = data.platform === 'x'
+            ? normalizeXAssets(data.assets)
+            : (data.platform === 'instagram' ? normalizeInstagramAssets(data.assets) : []);
 
         if (assets.length > 0) {
             const assetLabel = element(
@@ -184,12 +190,20 @@ export function initAnalyzer() {
                 const card = element('article', 'x-asset-card');
                 const preview = thumbnail(
                     asset.thumbnailUrl,
-                    xAssetLabel(asset),
+                    data.platform === 'instagram'
+                        ? instagramAssetLabel(asset)
+                        : xAssetLabel(asset),
                     'x-asset-preview',
                 );
                 const details = element('div', 'x-asset-details');
                 details.append(
-                    element('strong', '', xAssetLabel(asset)),
+                    element(
+                        'strong',
+                        '',
+                        data.platform === 'instagram'
+                            ? instagramAssetLabel(asset)
+                            : xAssetLabel(asset),
+                    ),
                     element(
                         'span',
                         '',
@@ -224,7 +238,7 @@ export function initAnalyzer() {
             outputLabel,
             outputs,
                 element('p', 'output-note', data.status === 'ready'
-                    ? 'X metadata is ready. Secure download delivery arrives in a later step.'
+                    ? `${data.platform_label} metadata is ready. Secure download delivery arrives in a later step.`
                     : 'This is a format preview. Download controls become available with the media engine.'),
         );
         resultPanel.append(media, copy);

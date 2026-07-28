@@ -179,7 +179,8 @@ async def extract(payload: ExtractRequest, request: Request) -> JSONResponse:
             )
         )
     except ProviderError as exception:
-        request.state.provider = "x"
+        provider = exception.details.get("provider")
+        request.state.provider = provider if isinstance(provider, str) else None
         return error_response(
             ContractError(
                 exception.code,

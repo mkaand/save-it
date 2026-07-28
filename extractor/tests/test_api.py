@@ -19,7 +19,6 @@ client = TestClient(main.app, raise_server_exceptions=False)
 @pytest.mark.parametrize(
     ("url", "provider", "label", "variant"),
     [
-        ("https://www.instagram.com/p/example/", "instagram", "Instagram", None),
         ("https://www.youtube.com/watch?v=abcdefghijk", "youtube", "YouTube", None),
         ("https://youtu.be/abcdefghijk", "youtube", "YouTube", None),
         (
@@ -193,7 +192,7 @@ def test_fragment_is_removed_and_query_is_preserved() -> None:
 def test_server_generates_safe_request_id() -> None:
     response = client.post(
         "/v1/extract",
-        json={"url": "https://www.instagram.com/p/example/"},
+        json={"url": "https://www.tiktok.com/@example/video/123"},
     )
     request_id = response.json()["error"]["request_id"]
 
@@ -211,7 +210,7 @@ def test_contract_never_invokes_network_dns_or_shell(monkeypatch: pytest.MonkeyP
 
     response = client.post(
         "/v1/extract",
-        json={"url": "https://www.instagram.com/p/example/"},
+        json={"url": "https://www.tiktok.com/@example/video/123"},
     )
 
     assert response.status_code == 501

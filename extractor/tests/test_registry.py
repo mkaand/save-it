@@ -42,7 +42,7 @@ def test_every_stub_returns_controlled_empty_result() -> None:
     registry = ProviderRegistry()
 
     for provider in Provider:
-        if provider is Provider.X:
+        if provider in {Provider.X, Provider.INSTAGRAM}:
             continue
         context = classify_url(_example_url(provider))
         result = asyncio.run(registry.get(provider).extract(context, "registry-test"))

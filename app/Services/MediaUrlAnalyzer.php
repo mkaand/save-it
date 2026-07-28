@@ -28,8 +28,11 @@ final class MediaUrlAnalyzer
         $recognition = $this->extractor->recognize(trim($input));
         $platform = $recognition->platform;
 
-        if ($recognition->status === 'ready' && $platform === MediaPlatform::X) {
-            return $this->xResult($recognition);
+        if (
+            $recognition->status === 'ready'
+            && in_array($platform, [MediaPlatform::X, MediaPlatform::Instagram], true)
+        ) {
+            return $this->providerResult($recognition);
         }
 
         $parts = parse_url($recognition->normalizedUrl);
@@ -60,14 +63,16 @@ final class MediaUrlAnalyzer
     /**
      * @return array<string, mixed>
      */
-    private function xResult(ExtractorRecognition $recognition): array
+    private function providerResult(ExtractorRecognition $recognition): array
     {
         $metadata = $recognition->metadata ?? [];
         $text = $metadata['text'] ?? null;
         $handle = $metadata['author_handle'] ?? null;
         $title = is_string($text) && $text !== ''
             ? $text
-            : (is_string($handle) && $handle !== '' ? "X post by @{$handle}" : 'X post');
+            : (is_string($handle) && $handle !== ''
+                ? "{$recognition->platform->label()} post by @{$handle}"
+                : "{$recognition->platform->label()} post");
         $thumbnail = $metadata['thumbnail_url'] ?? null;
 
         if (! is_string($thumbnail)) {
@@ -75,8 +80,8 @@ final class MediaUrlAnalyzer
         }
 
         return [
-            'platform' => MediaPlatform::X->value,
-            'platform_label' => MediaPlatform::X->label(),
+            'platform' => $recognition->platform->value,
+            'platform_label' => $recognition->platform->label(),
             'media_type' => $recognition->mediaType,
             'url' => $recognition->normalizedUrl,
             'title' => $title,
