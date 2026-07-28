@@ -7,6 +7,11 @@ import {
     mountPlatformIcons,
     platformIcon,
 } from './platform-icons.js';
+import {
+    normalizeXAssets,
+    safeResultImageUrl,
+    xAssetLabel,
+} from './x-result.js';
 
 function browserStorage() {
     try {
@@ -35,7 +40,9 @@ function thumbnail(url, title, className) {
     const fallback = element('span', 'thumbnail-fallback', 'SI');
     wrapper.append(fallback);
 
-    if (!url) {
+    const safeUrl = safeResultImageUrl(url);
+
+    if (!safeUrl) {
         return wrapper;
     }
 
@@ -45,7 +52,7 @@ function thumbnail(url, title, className) {
     image.referrerPolicy = 'no-referrer';
     image.addEventListener('load', () => fallback.remove());
     image.addEventListener('error', () => image.remove());
-    image.src = url;
+    image.src = safeUrl;
     wrapper.prepend(image);
 
     return wrapper;
@@ -163,6 +170,40 @@ export function initAnalyzer() {
         url.title = data.url;
         const outputLabel = element('p', 'output-label', 'Planned output options');
         const outputs = element('div', 'output-grid');
+        const assets = data.platform === 'x' ? normalizeXAssets(data.assets) : [];
+
+        if (assets.length > 0) {
+            const assetLabel = element(
+                'p',
+                'output-label',
+                `${assets.length} media ${assets.length === 1 ? 'asset' : 'assets'}`,
+            );
+            const assetGrid = element('div', 'x-asset-grid');
+
+            assets.forEach((asset) => {
+                const card = element('article', 'x-asset-card');
+                const preview = thumbnail(
+                    asset.thumbnailUrl,
+                    xAssetLabel(asset),
+                    'x-asset-preview',
+                );
+                const details = element('div', 'x-asset-details');
+                details.append(
+                    element('strong', '', xAssetLabel(asset)),
+                    element(
+                        'span',
+                        '',
+                        asset.variants.length > 0
+                            ? `${asset.variants.length} source variants`
+                            : 'Original image metadata',
+                    ),
+                );
+                card.append(preview, details);
+                assetGrid.append(card);
+            });
+
+            copy.append(assetLabel, assetGrid);
+        }
 
         data.outputs.forEach((output) => {
             const button = element('button', 'output-option');
@@ -182,7 +223,9 @@ export function initAnalyzer() {
             url,
             outputLabel,
             outputs,
-            element('p', 'output-note', 'This is a format preview. Download controls become available with the media engine.'),
+                element('p', 'output-note', data.status === 'ready'
+                    ? 'X metadata is ready. Secure download delivery arrives in a later step.'
+                    : 'This is a format preview. Download controls become available with the media engine.'),
         );
         resultPanel.append(media, copy);
         resultSection.hidden = false;

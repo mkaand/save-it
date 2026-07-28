@@ -2,9 +2,10 @@
 
 Save It is a privacy-conscious media URL analysis experience built with Laravel 12 and PHP 8.2. The public application runs at `https://save.allmy.win`.
 
-PR #4 introduces an internal Python extractor contract, secure provider registry, and
-stub adapters. It also completes the approved Save It icon set and mobile footer
-polish. Actual media extraction and downloading are not implemented yet.
+PR #5 implements real, metadata-only extraction for public X posts through the
+internal Python provider adapter. It supports video metadata and variants, images,
+carousels, mixed media, and animated-GIF transport metadata. Media file delivery is
+not implemented yet.
 
 ## Current capabilities
 
@@ -19,16 +20,19 @@ polish. Actual media extraction and downloading are not implemented yet.
 - Stateless JSON health endpoint
 - Docker services for PHP-FPM, Nginx, Redis, the queue worker, and scheduler
 - Internal Python 3.12 extractor service with FastAPI, Pydantic, and versioned API v1
-- Exact-host provider registry with controlled, non-fetching stub adapters
+- Exact-host provider registry with an X adapter and controlled stubs for other providers
+- X public post metadata, ordered assets, and source video variants
+- Compact local GitHub link that identifies Save It as open source
 - Canonical Save It SVG, favicons, Apple Touch Icon, and web app manifest
 - Immutable app and Nginx images that share one Vite build artifact
 - Production PHP error policy and GitHub Actions CI
 
-Platform labels describe the current roadmap:
+Platform labels describe the current implementation:
 
-- YouTube and YouTube Shorts: MVP targets
+- X: public media extraction available; download delivery remains planned
+- YouTube and YouTube Shorts: URL previews; extraction remains planned
 - LinkedIn: Beta URL recognition
-- Instagram, TikTok, X, and Facebook: analysis foundation; media engine support is planned
+- Instagram, TikTok, and Facebook: URL recognition; extraction is planned
 
 ## Analyze endpoint
 
@@ -46,15 +50,17 @@ The endpoint delegates authoritative provider recognition to the internal extrac
 - accepts only HTTP and HTTPS URLs;
 - uses exact hostname matching to prevent suffix attacks;
 - rejects embedded credentials, custom ports, localhost, and IP address URLs;
-- does not resolve DNS, fetch submitted URLs, follow redirects, run shell commands, create jobs, or store history;
-- returns normalized preview metadata with all download options marked unavailable;
+- does not fetch arbitrary submitted URLs, run shell commands, create jobs, or store history;
+- permits only the X adapter to fetch a canonical, service-constructed metadata URL;
+- returns real X metadata or normalized previews for stubs, with download controls unavailable;
 - is limited to 30 requests per minute per client IP.
 
 Laravel calls `POST http://extractor:8000/v1/extract` with explicit connect and total
-timeouts and redirects disabled. Recognized stub providers return a controlled
-internal `501 provider_not_implemented`; Laravel maps that response to the existing
-public preview. Extractor connection failures become a safe public `503`, while an
-invalid extractor contract becomes a safe `502`.
+timeouts and redirects disabled. X success responses are validated and mapped into a
+limited public asset DTO. Recognized stubs return a controlled internal `501
+provider_not_implemented`, which Laravel maps to a preview. Extractor or X upstream
+failures become safe public errors, while an invalid extractor contract becomes a
+safe `502`.
 
 See [Extractor API v1](docs/extractor-api-v1.md) for the complete request, response,
 error, versioning, and privacy contract.
@@ -64,7 +70,7 @@ Supported normalized hosts include:
 - `youtube.com`, `www.youtube.com`, `m.youtube.com`, `music.youtube.com`, `youtu.be`
 - `instagram.com`, `www.instagram.com`
 - `tiktok.com`, `www.tiktok.com`, `vm.tiktok.com`, `vt.tiktok.com`
-- `x.com`, `www.x.com`, `twitter.com`, `www.twitter.com`
+- `x.com`, `www.x.com`, `twitter.com`, `www.twitter.com`, `mobile.twitter.com`
 - `facebook.com`, `www.facebook.com`, `m.facebook.com`, `fb.watch`
 - `linkedin.com`, `www.linkedin.com`
 
@@ -78,25 +84,29 @@ host network, or production source bind mount.
 `POST /v1/extract` accepts metadata-only requests up to 8 KiB and URLs up to 2,048
 characters. Pydantic rejects unknown fields. The provider registry classifies X,
 Instagram, YouTube (including the Shorts subtype), TikTok, Facebook, and LinkedIn.
-Every adapter is a `not_implemented` stub in PR #4.
+The X adapter accepts only canonical status paths, fetches bounded structured
+metadata from `cdn.syndication.twimg.com`, and emits allowlisted
+`pbs.twimg.com`/`video.twimg.com` asset references. All other adapters remain
+`not_implemented` stubs.
 
 The service uses these non-secret settings:
 
 ```dotenv
 EXTRACTOR_BASE_URL=http://extractor:8000
-EXTRACTOR_TIMEOUT_SECONDS=5
+EXTRACTOR_TIMEOUT_SECONDS=15
 EXTRACTOR_CONNECT_TIMEOUT_SECONDS=2
 EXTRACTOR_APP_NAME=save-it-extractor
 EXTRACTOR_ENV=production
 EXTRACTOR_LOG_LEVEL=INFO
 EXTRACTOR_API_VERSION=1
-EXTRACTOR_REQUEST_TIMEOUT_SECONDS=10
+EXTRACTOR_REQUEST_TIMEOUT_SECONDS=12
 ```
 
 Structured logs include correlation and timing fields but omit full URLs, query
-strings, headers, cookies, and bodies. The service contains no outbound HTTP client,
-DNS resolution, redirect following, shell invocation, yt-dlp, FFmpeg, or download
-path.
+strings, headers, cookies, and bodies. The X client uses verified TLS, ignores proxy
+environment variables, validates DNS results and each redirect target, limits
+redirects and decompressed response size, and does not fetch media binaries. The
+service contains no shell invocation, yt-dlp, FFmpeg, or download path.
 
 Run Python checks in an isolated Python 3.12 environment:
 
@@ -111,9 +121,9 @@ ruff format --check src tests
 pip-audit --requirement requirements.lock --no-deps --disable-pip
 ```
 
-PR #5 is the next provider implementation and will add X support. Instagram,
-YouTube, and LinkedIn remain planned for PRs #6, #7, and #8 respectively. A dedicated
-outbound policy must be added before any adapter performs remote access.
+PR #6 is the next provider implementation and will add Instagram support. YouTube
+and LinkedIn remain planned for PRs #7 and #8. PR #10 still owns centralized egress,
+DNS-rebinding, and redirect-chain hardening beyond the X-specific baseline.
 
 ## Recent Fetches
 
@@ -140,7 +150,7 @@ Invalid or unavailable browser storage safely falls back to system mode. Theme s
 
 ## Current limitations
 
-The following are intentionally not implemented in PR #4:
+The following are intentionally not implemented in PR #5:
 
 - yt-dlp, FFmpeg, or any other extraction engine
 - functional media download links
@@ -149,8 +159,10 @@ The following are intentionally not implemented in PR #4:
 - queue-backed analysis jobs
 - server-side Recent Fetches persistence
 - cross-browser or cross-device history synchronization
-- X, Instagram, YouTube, TikTok, Facebook, or LinkedIn extraction logic
-- provider outbound networking, DNS resolution, or redirect following
+- Instagram, YouTube, TikTok, Facebook, or LinkedIn extraction logic
+- X private/protected posts or authenticated extraction
+- media file delivery, URL proxying, or expired asset URL renewal
+- centralized PR #10 egress and DNS-rebinding controls
 
 Planned YouTube outputs are MP4 with an H.264 compatibility preference, M4A, MP3 conversion, and thumbnail download. They remain disabled previews until the media engine is implemented.
 
@@ -163,7 +175,7 @@ Planned YouTube outputs are MP4 with an H.264 compatibility preference, M4A, MP3
 - Redis for cache, sessions, and queues
 - Docker Compose services: `app`, `nginx`, `redis`, `worker`, `scheduler`, and the
   internal-only `extractor`
-- Python 3.12, FastAPI 0.140.7, Pydantic 2.13.4, and Uvicorn 0.51.0
+- Python 3.12, FastAPI 0.140.7, Pydantic 2.13.4, HTTPX 0.28.1, and Uvicorn 0.51.0
 - Simple Icons `16.27.1` as an exact development dependency for selected local brand glyphs
 
 Nginx is published only on `127.0.0.1:8099`. Redis has no host port.
@@ -281,7 +293,12 @@ runtime audit, Docker Compose, all changed images, and matching app/Nginx manife
 
 ## Brand icon notice
 
-YouTube, YouTube Shorts, Instagram, TikTok, X, and Facebook glyph data come from the pinned [Simple Icons](https://simpleicons.org/) package under CC0-1.0. The local LinkedIn fallback uses the CC0 Simple Icons glyph shape retained for compatibility. Brand names and marks belong to their respective owners. Their presence describes URL recognition status and does not imply affiliation, endorsement, or partnership.
+YouTube, YouTube Shorts, Instagram, TikTok, X, Facebook, and the locally generated
+GitHub glyph data come from the pinned [Simple Icons](https://simpleicons.org/)
+package under CC0-1.0. The local LinkedIn fallback uses the CC0 Simple Icons glyph
+shape retained for compatibility. Brand names and marks belong to their respective
+owners. Their presence describes functionality or links to source code and does not
+imply affiliation, endorsement, or partnership.
 
 ## AI-assisted development
 

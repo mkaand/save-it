@@ -13,6 +13,7 @@ from save_it_extractor.api.models import ExtractRequest
 from save_it_extractor.config import settings
 from save_it_extractor.domain.urls import UrlValidationError
 from save_it_extractor.logging import log_event
+from save_it_extractor.providers.errors import ProviderError
 from save_it_extractor.services.extractor import ExtractionService
 
 
@@ -177,8 +178,40 @@ async def extract(payload: ExtractRequest, request: Request) -> JSONResponse:
                 request_id,
             )
         )
+    except ProviderError as exception:
+        request.state.provider = "x"
+        return error_response(
+            ContractError(
+                exception.code,
+                exception.message,
+                exception.status_code,
+                request_id,
+                exception.details,
+            )
+        )
 
     request.state.provider = result.provider.value
+    if result.status == "ready":
+        return JSONResponse(
+            status_code=200,
+            content={
+                "data": {
+                    "request_id": result.request_id,
+                    "provider": result.provider.value,
+                    "provider_label": result.provider_label,
+                    "provider_variant": result.variant,
+                    "media_type": result.media_type,
+                    "source_url": payload.url,
+                    "normalized_url": result.normalized_url,
+                    "status": result.status,
+                    "metadata": result.metadata,
+                    "assets": result.assets,
+                    "capabilities": result.capabilities,
+                }
+            },
+            headers={"X-Request-ID": request_id},
+        )
+
     return error_response(
         ContractError(
             "provider_not_implemented",

@@ -10,6 +10,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from save_it_extractor import main
+from save_it_extractor.domain.models import ExtractResult, Provider
+from save_it_extractor.domain.urls import classify_url
 
 client = TestClient(main.app, raise_server_exceptions=False)
 
@@ -17,8 +19,6 @@ client = TestClient(main.app, raise_server_exceptions=False)
 @pytest.mark.parametrize(
     ("url", "provider", "label", "variant"),
     [
-        ("https://x.com/example/status/123", "x", "X", None),
-        ("https://twitter.com/example/status/123", "x", "X", None),
         ("https://www.instagram.com/p/example/", "instagram", "Instagram", None),
         ("https://www.youtube.com/watch?v=abcdefghijk", "youtube", "YouTube", None),
         ("https://youtu.be/abcdefghijk", "youtube", "YouTube", None),
@@ -75,6 +75,46 @@ def test_health_is_safe() -> None:
     assert "app_key" not in serialized
 
 
+def test_x_success_uses_versioned_data_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+    result = ExtractResult(
+        request_id="contract-test-x",
+        provider=Provider.X,
+        provider_label="X",
+        normalized_url="https://x.com/example/status/123",
+        variant=None,
+        status="ready",
+        media_type="video",
+        metadata={"post_id": "123", "media_count": 1},
+        assets=[{"id": "asset-1", "type": "video", "order": 1}],
+        capabilities=["metadata", "media_assets"],
+    )
+    monkeypatch.setattr(main.service, "extract", AsyncMock(return_value=result))
+
+    response = client.post(
+        "/v1/extract",
+        json={
+            "url": "https://x.com/example/status/123",
+            "request_id": "contract-test-x",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "request_id": "contract-test-x",
+        "provider": "x",
+        "provider_label": "X",
+        "provider_variant": None,
+        "media_type": "video",
+        "source_url": "https://x.com/example/status/123",
+        "normalized_url": "https://x.com/example/status/123",
+        "status": "ready",
+        "metadata": {"post_id": "123", "media_count": 1},
+        "assets": [{"id": "asset-1", "type": "video", "order": 1}],
+        "capabilities": ["metadata", "media_assets"],
+    }
+    assert "traceback" not in response.text.lower()
+
+
 def test_readiness_is_safe() -> None:
     response = client.get("/ready")
 
@@ -90,8 +130,10 @@ def test_readiness_is_safe() -> None:
         ({"url": "ftp://x.com/file"}, "unsupported_scheme", 422),
         ({"url": "https://example.com/file"}, "unsupported_host", 422),
         ({"url": "https://youtube.com.attacker.example/watch"}, "unsupported_host", 422),
-        ({"url": "https://user:password@x.com/post"}, "embedded_credentials", 422),
-        ({"url": "https://x.com:8443/post"}, "disallowed_port", 422),
+        ({"url": "https://user:password@x.com/example/status/1"}, "embedded_credentials", 422),
+        ({"url": "https://x.com:8443/example/status/1"}, "disallowed_port", 422),
+        ({"url": "https://x.com/example"}, "invalid_x_post_url", 422),
+        ({"url": "https://x.com/example/status/not-a-number"}, "invalid_x_post_url", 422),
         ({"url": "http://localhost/post"}, "unsupported_host", 422),
         ({"url": "http://127.0.0.1/post"}, "unsupported_host", 422),
         ({"url": "http://10.20.30.40/post"}, "unsupported_host", 422),
@@ -100,17 +142,17 @@ def test_readiness_is_safe() -> None:
         ({"url": "http://[fc00::1]/post"}, "unsupported_host", 422),
         ({"url": "http://[fe80::1]/post"}, "unsupported_host", 422),
         (
-            {"url": "https://x.com/post", "request_id": "spaces are unsafe"},
+            {"url": "https://x.com/example/status/1", "request_id": "spaces are unsafe"},
             "validation_error",
             400,
         ),
         (
-            {"url": "https://x.com/post", "unexpected": True},
+            {"url": "https://x.com/example/status/1", "unexpected": True},
             "validation_error",
             400,
         ),
         (
-            {"url": "https://x.com/post", "options": {"metadata_only": False}},
+            {"url": "https://x.com/example/status/1", "options": {"metadata_only": False}},
             "validation_error",
             400,
         ),
@@ -144,20 +186,15 @@ def test_oversized_request_body_is_rejected() -> None:
 
 
 def test_fragment_is_removed_and_query_is_preserved() -> None:
-    response = client.post(
-        "/v1/extract",
-        json={"url": "HTTPS://WWW.X.COM/example/status/123?ref=safe#fragment"},
-    )
-
-    assert response.status_code == 501
-    assert (
-        response.json()["error"]["details"]["normalized_url"]
-        == "https://www.x.com/example/status/123?ref=safe"
-    )
+    normalized = classify_url("HTTPS://WWW.X.COM/example/status/123/photo/1?ref=safe#fragment")
+    assert normalized.normalized_url == "https://x.com/example/status/123"
 
 
 def test_server_generates_safe_request_id() -> None:
-    response = client.post("/v1/extract", json={"url": "https://x.com/example/status/123"})
+    response = client.post(
+        "/v1/extract",
+        json={"url": "https://www.instagram.com/p/example/"},
+    )
     request_id = response.json()["error"]["request_id"]
 
     assert response.headers["x-request-id"] == request_id

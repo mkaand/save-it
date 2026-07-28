@@ -28,6 +28,7 @@ class ProviderContext:
     provider_label: str
     normalized_url: str
     variant: str | None = None
+    source_url: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

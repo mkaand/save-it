@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 import pngToIco from 'png-to-ico';
 import sharp from 'sharp';
+import { siGithub } from 'simple-icons';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const sourcePath = path.join(root, 'resources/branding/save-it-mark.svg');
@@ -16,6 +17,10 @@ await mkdir(brandPath, { recursive: true });
 await mkdir(iconsPath, { recursive: true });
 await writeFile(path.join(brandPath, 'save-it-mark.svg'), source);
 await writeFile(path.join(publicPath, 'favicon.svg'), source);
+await writeFile(
+    path.join(brandPath, 'github-mark.svg'),
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="GitHub"><path fill="currentColor" d="${siGithub.path}"/></svg>\n`,
+);
 
 async function render(size, output) {
     const buffer = await sharp(source)

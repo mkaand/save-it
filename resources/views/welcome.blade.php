@@ -103,6 +103,17 @@
 
             <div class="shell hero-grid">
                 <div class="hero-copy">
+                    <a
+                        class="open-source-link"
+                        href="https://github.com/mkaand/save-it"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label="Open source on GitHub — explore the Save It repository"
+                    >
+                        <img src="/brand/github-mark.svg" width="16" height="16" alt="" aria-hidden="true">
+                        <span><strong>Open source on GitHub</strong><small>Built in public</small></span>
+                        <span class="open-source-arrow" aria-hidden="true">↗</span>
+                    </a>
                     <p class="eyebrow"><span></span> Fast preview. Less noise.</p>
                     <h1>Download media.<br><em>Keep it simple.</em></h1>
                     <p class="hero-lead">
@@ -169,19 +180,19 @@
                         <p class="eyebrow"><span></span> Platform roadmap</p>
                         <h2 id="platform-heading">Recognized links, honest status.</h2>
                     </div>
-                    <p>URL recognition is available now. Real extraction and downloads arrive with the media engine.</p>
+                    <p>X media extraction is available now. Download delivery and other providers remain on the roadmap.</p>
                 </div>
 
                 <div class="platform-grid">
-                    <article class="platform-card is-primary">
+                    <article class="platform-card">
                         <span class="platform-icon-slot" data-platform-icon="youtube" aria-hidden="true">YT</span>
                         <div><h3>YouTube</h3><p>Video URL preview</p></div>
-                        <span class="status-badge status-mvp">MVP</span>
+                        <span class="status-badge">Planned</span>
                     </article>
-                    <article class="platform-card is-primary">
+                    <article class="platform-card">
                         <span class="platform-icon-slot" data-platform-icon="youtube_shorts" aria-hidden="true">YS</span>
                         <div><h3>YouTube Shorts</h3><p>Short-form detection</p></div>
-                        <span class="status-badge status-mvp">MVP</span>
+                        <span class="status-badge">Planned</span>
                     </article>
                     <article class="platform-card">
                         <span class="platform-icon-slot" data-platform-icon="instagram" aria-hidden="true">IG</span>
@@ -193,10 +204,10 @@
                         <div><h3>TikTok</h3><p>Recognition only</p></div>
                         <span class="status-badge">Planned</span>
                     </article>
-                    <article class="platform-card">
+                    <article class="platform-card is-primary" data-x-extractor-available>
                         <span class="platform-icon-slot" data-platform-icon="x" aria-hidden="true">X</span>
-                        <div><h3>X</h3><p>Recognition only</p></div>
-                        <span class="status-badge">Planned</span>
+                        <div><h3>X</h3><p>Media extraction</p></div>
+                        <span class="status-badge status-mvp">Available</span>
                     </article>
                     <article class="platform-card">
                         <span class="platform-icon-slot" data-platform-icon="facebook" aria-hidden="true">FB</span>
