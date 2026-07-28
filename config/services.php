@@ -41,4 +41,10 @@ return [
         'connect_timeout_seconds' => (float) env('EXTRACTOR_CONNECT_TIMEOUT_SECONDS', 2),
     ],
 
+    'umami' => [
+        'enabled' => (bool) env('UMAMI_ENABLED', false),
+        'script_url' => env('UMAMI_SCRIPT_URL'),
+        'website_id' => env('UMAMI_WEBSITE_ID'),
+    ],
+
 ];

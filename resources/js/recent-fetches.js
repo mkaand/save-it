@@ -40,7 +40,9 @@ export function normalizeRecentFetch(value, analyzedAt = new Date().toISOString(
         mediaType: String(value.mediaType || 'video').slice(0, 40),
         url,
         title: String(value.title || 'Untitled media').slice(0, 160),
-        thumbnailUrl: safeUrl(value.thumbnailUrl, true),
+        thumbnailUrl: value.platform === 'instagram'
+            ? null
+            : safeUrl(value.thumbnailUrl, true),
         analyzedAt: timestamp,
     };
 }

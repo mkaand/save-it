@@ -73,11 +73,17 @@ def classify_url(raw_url: str, max_length: int = 2048) -> ProviderContext:
     normalized = (
         _normalize_x_url(hostname, parsed)
         if provider is Provider.X
-        else urlunsplit((parsed.scheme.lower(), hostname, parsed.path or "/", parsed.query, ""))
+        else (
+            _normalize_instagram_url(parsed)
+            if provider is Provider.INSTAGRAM
+            else urlunsplit((parsed.scheme.lower(), hostname, parsed.path or "/", parsed.query, ""))
+        )
     )
-    variant = (
-        "shorts" if provider is Provider.YOUTUBE and parsed.path.startswith("/shorts/") else None
-    )
+    variant = None
+    if provider is Provider.YOUTUBE and parsed.path.startswith("/shorts/"):
+        variant = "shorts"
+    elif provider is Provider.INSTAGRAM:
+        variant = "reel" if normalized.startswith("https://www.instagram.com/reel/") else "post"
 
     return ProviderContext(
         provider=provider,
@@ -91,6 +97,7 @@ def classify_url(raw_url: str, max_length: int = 2048) -> ProviderContext:
 X_STATUS_PATH = re.compile(
     r"^/([A-Za-z0-9_]{1,15})/status/([0-9]{1,20})(?:/(?:photo|video)/[1-9][0-9]*)?/?$"
 )
+INSTAGRAM_MEDIA_PATH = re.compile(r"^/(p|reel)/([A-Za-z0-9_-]{5,64})/?$")
 
 
 def _normalize_x_url(hostname: str, parsed: SplitResult) -> str:
@@ -103,6 +110,18 @@ def _normalize_x_url(hostname: str, parsed: SplitResult) -> str:
 
     username, status_id = match.groups()
     return f"https://x.com/{username}/status/{status_id}"
+
+
+def _normalize_instagram_url(parsed: SplitResult) -> str:
+    match = INSTAGRAM_MEDIA_PATH.fullmatch(parsed.path)
+    if match is None:
+        raise UrlValidationError(
+            "invalid_instagram_media_url",
+            "The submitted URL is not a valid Instagram post or reel URL.",
+        )
+
+    kind, shortcode = match.groups()
+    return f"https://www.instagram.com/{kind}/{shortcode}/"
 
 
 def _normalize_hostname(parsed: SplitResult) -> str:

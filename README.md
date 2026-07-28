@@ -2,10 +2,9 @@
 
 Save It is a privacy-conscious media URL analysis experience built with Laravel 12 and PHP 8.2. The public application runs at `https://save.allmy.win`.
 
-PR #5 implements real, metadata-only extraction for public X posts through the
-internal Python provider adapter. It supports video metadata and variants, images,
-carousels, mixed media, and animated-GIF transport metadata. Media file delivery is
-not implemented yet.
+PR #6 adds real, metadata-only extraction for public Instagram posts and reels while
+retaining the public X extractor. It supports Instagram single images, videos,
+reels, and ordered carousels. Media file delivery is not implemented yet.
 
 ## Current capabilities
 
@@ -20,8 +19,11 @@ not implemented yet.
 - Stateless JSON health endpoint
 - Docker services for PHP-FPM, Nginx, Redis, the queue worker, and scheduler
 - Internal Python 3.12 extractor service with FastAPI, Pydantic, and versioned API v1
-- Exact-host provider registry with an X adapter and controlled stubs for other providers
+- Exact-host provider registry with X and Instagram adapters and controlled stubs for other providers
 - X public post metadata, ordered assets, and source video variants
+- Instagram public post/reel metadata and ordered image/video carousel assets
+- Open Graph, Twitter Card, robots, sitemap, manifest, and local social-preview assets
+- Optional production-only Umami analytics configured through untracked environment values
 - Compact local GitHub link that identifies Save It as open source
 - Canonical Save It SVG, favicons, Apple Touch Icon, and web app manifest
 - Immutable app and Nginx images that share one Vite build artifact
@@ -30,9 +32,10 @@ not implemented yet.
 Platform labels describe the current implementation:
 
 - X: public media extraction available; download delivery remains planned
+- Instagram: public post and reel extraction available; download delivery remains planned
 - YouTube and YouTube Shorts: URL previews; extraction remains planned
 - LinkedIn: Beta URL recognition
-- Instagram, TikTok, and Facebook: URL recognition; extraction is planned
+- TikTok and Facebook: URL recognition; extraction is planned
 
 ## Analyze endpoint
 
@@ -51,8 +54,8 @@ The endpoint delegates authoritative provider recognition to the internal extrac
 - uses exact hostname matching to prevent suffix attacks;
 - rejects embedded credentials, custom ports, localhost, and IP address URLs;
 - does not fetch arbitrary submitted URLs, run shell commands, create jobs, or store history;
-- permits only the X adapter to fetch a canonical, service-constructed metadata URL;
-- returns real X metadata or normalized previews for stubs, with download controls unavailable;
+- permits X and Instagram adapters to fetch canonical, service-constructed metadata URLs;
+- returns real X/Instagram metadata or normalized previews for stubs, with download controls unavailable;
 - is limited to 30 requests per minute per client IP.
 
 Laravel calls `POST http://extractor:8000/v1/extract` with explicit connect and total
@@ -86,7 +89,9 @@ characters. Pydantic rejects unknown fields. The provider registry classifies X,
 Instagram, YouTube (including the Shorts subtype), TikTok, Facebook, and LinkedIn.
 The X adapter accepts only canonical status paths, fetches bounded structured
 metadata from `cdn.syndication.twimg.com`, and emits allowlisted
-`pbs.twimg.com`/`video.twimg.com` asset references. All other adapters remain
+`pbs.twimg.com`/`video.twimg.com` asset references. The Instagram adapter accepts only
+post and reel paths, fetches bounded public embed metadata from `www.instagram.com`,
+and emits allowlisted `*.cdninstagram.com` asset references. Other adapters remain
 `not_implemented` stubs.
 
 The service uses these non-secret settings:
@@ -103,9 +108,9 @@ EXTRACTOR_REQUEST_TIMEOUT_SECONDS=12
 ```
 
 Structured logs include correlation and timing fields but omit full URLs, query
-strings, headers, cookies, and bodies. The X client uses verified TLS, ignores proxy
-environment variables, validates DNS results and each redirect target, limits
-redirects and decompressed response size, and does not fetch media binaries. The
+strings, headers, cookies, and bodies. Provider clients use verified TLS, ignore proxy
+environment variables, validate DNS results and each redirect target, limit
+redirects and decompressed response size, and do not fetch media binaries. The
 service contains no shell invocation, yt-dlp, FFmpeg, or download path.
 
 Run Python checks in an isolated Python 3.12 environment:
@@ -121,8 +126,17 @@ ruff format --check src tests
 pip-audit --requirement requirements.lock --no-deps --disable-pip
 ```
 
-PR #6 is the next provider implementation and will add Instagram support. YouTube
-and LinkedIn remain planned for PRs #7 and #8. PR #10 still owns centralized egress,
+Optional provider live checks are excluded from CI and must be enabled explicitly:
+
+```bash
+SAVE_IT_RUN_INSTAGRAM_LIVE_TESTS=1 PYTHONPATH=src pytest -m live \
+  tests/test_instagram_provider.py
+```
+
+The checked-in Instagram tests otherwise use deterministic metadata fixtures and
+mock transports. No credentials, cookies, or private content are required.
+
+YouTube and LinkedIn remain planned for PRs #7 and #8. PR #10 still owns centralized egress,
 DNS-rebinding, and redirect-chain hardening beyond the X-specific baseline.
 
 ## Recent Fetches
@@ -150,16 +164,17 @@ Invalid or unavailable browser storage safely falls back to system mode. Theme s
 
 ## Current limitations
 
-The following are intentionally not implemented in PR #5:
+The following are intentionally not implemented in PR #6:
 
-- yt-dlp, FFmpeg, or any other extraction engine
+- yt-dlp, FFmpeg, download, or conversion engines
 - functional media download links
 - real duration, size, quality, creator, or channel metadata
 - playlists and livestreams
 - queue-backed analysis jobs
 - server-side Recent Fetches persistence
 - cross-browser or cross-device history synchronization
-- Instagram, YouTube, TikTok, Facebook, or LinkedIn extraction logic
+- YouTube, TikTok, Facebook, or LinkedIn extraction logic
+- Instagram Stories, Live, private, or login-required extraction
 - X private/protected posts or authenticated extraction
 - media file delivery, URL proxying, or expired asset URL renewal
 - centralized PR #10 egress and DNS-rebinding controls
@@ -214,9 +229,25 @@ For production, configure the untracked `.env` with:
 APP_NAME="Save It"
 APP_ENV=production
 APP_DEBUG=false
+UMAMI_ENABLED=true
+UMAMI_SCRIPT_URL=https://stats.allmy.win/script.js
+UMAMI_WEBSITE_ID=your-untracked-website-id
 ```
 
 Keep the generated `APP_KEY` private. Compose uses environment interpolation with production-safe defaults and does not contain an application key.
+Keep `UMAMI_WEBSITE_ID` untracked. Analytics render only when the application
+environment is `production`, the feature is enabled, and the ID is present. A missing
+or blocked analytics script never blocks the application.
+
+## Public release files
+
+- `LICENSE` contains the MIT license.
+- `CONTRIBUTING.md` documents the pull-request and validation workflow.
+- `public/robots.txt` allows indexing and points to `public/sitemap.xml`.
+- `public/site.webmanifest`, local favicons, Apple Touch Icon, and PWA icons are
+  generated from repository-owned assets.
+- `resources/branding/save-it-social-card.svg` generates the local 1200×630 Open
+  Graph/Twitter preview image during `npm run generate:icons`.
 
 The `.env.example` extractor URL points only to the internal Compose service. Do not
 publish the extractor port or derive its base URL from submitted media URLs.
@@ -290,6 +321,19 @@ Cloudflare and Hestia configuration are managed outside this repository.
 requests and pushes to `main`. It validates Composer metadata, dependency audits,
 Laravel tests, Pint, JavaScript tests, icon generation, pytest, Ruff, the Python
 runtime audit, Docker Compose, all changed images, and matching app/Nginx manifests.
+
+## SEO, social previews, and analytics
+
+The landing page publishes canonical, Open Graph, and Twitter Card metadata with a
+local 1200×630 Save It preview image. The same standards-based tags are suitable for
+X, Facebook, LinkedIn, Telegram, WhatsApp, and Discord link unfurlers without a
+runtime social API. `robots.txt`, `sitemap.xml`, the web app manifest, favicons, and
+theme metadata are served locally.
+
+Umami is optional and disabled by default. It is rendered only in Laravel's
+`production` environment when `UMAMI_ENABLED=true`, the configured script URL
+matches the approved analytics origin, and an untracked website ID is present. The
+deferred analytics request is not required for application operation.
 
 ## Brand icon notice
 

@@ -113,3 +113,17 @@ test('does not persist X asset arrays or expiring media URLs', () => {
     assert.equal(stored.items[0].assets, undefined);
     assert.equal(JSON.stringify(stored).includes('video.twimg.com'), false);
 });
+
+test('does not persist expiring Instagram CDN thumbnails', () => {
+    const storage = new MemoryStorage();
+    addRecentFetch(storage, {
+        ...item(1, 'https://www.instagram.com/p/Code123/'),
+        platform: 'instagram',
+        platformLabel: 'Instagram',
+        thumbnailUrl: 'https://scontent.example.cdninstagram.com/image.jpg?token=temporary',
+    });
+
+    const stored = JSON.parse(storage.getItem(RECENT_FETCHES_KEY));
+    assert.equal(stored.items[0].thumbnailUrl, null);
+    assert.equal(JSON.stringify(stored).includes('cdninstagram.com'), false);
+});

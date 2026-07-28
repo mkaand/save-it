@@ -69,7 +69,10 @@ final class ExtractorClient
                 throw $this->invalidContract($requestId);
             }
 
-            throw new InvalidArgumentException($this->validationMessage($code));
+            throw new InvalidArgumentException($this->validationMessage(
+                $code,
+                data_get($payload, 'error.details.provider'),
+            ));
         }
 
         if ($response->serverError()) {
@@ -86,18 +89,22 @@ final class ExtractorClient
 
     private function recognitionFromData(mixed $data, string $requestId): ExtractorRecognition
     {
+        $provider = is_array($data) ? ($data['provider'] ?? null) : null;
+        $platform = is_string($provider) ? MediaPlatform::tryFrom($provider) : null;
+        $variant = is_array($data) ? ($data['provider_variant'] ?? null) : null;
+
         if (
             ! is_array($data)
             || ! is_string($data['request_id'] ?? null)
             || ! hash_equals($requestId, $data['request_id'])
-            || ($data['provider'] ?? null) !== MediaPlatform::X->value
-            || ($data['provider_label'] ?? null) !== 'X'
-            || ($data['provider_variant'] ?? null) !== null
+            || ! in_array($platform, [MediaPlatform::X, MediaPlatform::Instagram], true)
+            || ($data['provider_label'] ?? null) !== $platform->label()
+            || ! $this->validReadyVariant($platform, $variant)
             || ($data['status'] ?? null) !== 'ready'
             || ! is_string($data['media_type'] ?? null)
-            || ! in_array($data['media_type'], ['video', 'image', 'carousel', 'mixed_media', 'animated_gif'], true)
+            || ! in_array($data['media_type'], ['video', 'image', 'carousel', 'mixed_media', 'animated_gif', 'reel'], true)
             || ! is_string($data['normalized_url'] ?? null)
-            || ! $this->isSafeXPostUrl($data['normalized_url'])
+            || ! $this->isSafeReadyUrl($platform, $data['normalized_url'], $variant)
             || ! is_array($data['metadata'] ?? null)
             || ! is_array($data['assets'] ?? null)
             || $data['assets'] === []
@@ -107,11 +114,11 @@ final class ExtractorClient
             throw $this->invalidContract($requestId);
         }
 
-        $metadata = $this->metadata($data['metadata'], $requestId);
+        $metadata = $this->metadata($data['metadata'], $platform, $requestId);
         $assets = [];
 
         foreach ($data['assets'] as $index => $asset) {
-            $assets[] = $this->asset($asset, $index + 1, $requestId);
+            $assets[] = $this->asset($asset, $index + 1, $platform, $requestId);
         }
 
         if ($metadata['media_count'] !== count($assets)) {
@@ -126,7 +133,7 @@ final class ExtractorClient
 
         return new ExtractorRecognition(
             requestId: $requestId,
-            platform: MediaPlatform::X,
+            platform: $platform,
             normalizedUrl: $data['normalized_url'],
             status: 'ready',
             mediaType: $data['media_type'],
@@ -140,8 +147,11 @@ final class ExtractorClient
      * @param  array<string, mixed>  $metadata
      * @return array<string, mixed>
      */
-    private function metadata(array $metadata, string $requestId): array
-    {
+    private function metadata(
+        array $metadata,
+        MediaPlatform $platform,
+        string $requestId,
+    ): array {
         $mediaCount = $metadata['media_count'] ?? null;
 
         if (! is_int($mediaCount) || $mediaCount < 1 || $mediaCount > 20) {
@@ -149,13 +159,23 @@ final class ExtractorClient
         }
 
         return [
-            'post_id' => $this->nullableString($metadata['post_id'] ?? null, 20),
-            'text' => $this->nullableString($metadata['text'] ?? null, 500),
+            'post_id' => $this->nullableString(
+                $metadata['post_id'] ?? null,
+                $platform === MediaPlatform::Instagram ? 64 : 20,
+            ),
+            'text' => $this->nullableString(
+                $metadata[$platform === MediaPlatform::Instagram ? 'caption' : 'text'] ?? null,
+                500,
+            ),
             'author_name' => $this->nullableString($metadata['author_name'] ?? null, 120),
-            'author_handle' => $this->nullableString($metadata['author_handle'] ?? null, 15),
+            'author_handle' => $this->nullableString(
+                $metadata['author_handle'] ?? null,
+                $platform === MediaPlatform::Instagram ? 30 : 15,
+            ),
             'published_at' => $this->nullableString($metadata['published_at'] ?? null, 40),
             'thumbnail_url' => $this->safeAssetUrl(
                 $metadata['thumbnail_url'] ?? null,
+                $platform,
                 $requestId,
                 true,
             ),
@@ -166,8 +186,12 @@ final class ExtractorClient
     /**
      * @return array<string, mixed>
      */
-    private function asset(mixed $asset, int $expectedOrder, string $requestId): array
-    {
+    private function asset(
+        mixed $asset,
+        int $expectedOrder,
+        MediaPlatform $platform,
+        string $requestId,
+    ): array {
         if (
             ! is_array($asset)
             || ! is_string($asset['id'] ?? null)
@@ -183,7 +207,7 @@ final class ExtractorClient
 
         $variants = [];
         foreach ($asset['variants'] as $variant) {
-            $variants[] = $this->variant($variant, $requestId);
+            $variants[] = $this->variant($variant, $platform, $requestId);
         }
 
         return [
@@ -191,9 +215,10 @@ final class ExtractorClient
             'order' => $expectedOrder,
             'type' => $asset['type'],
             'role' => $asset['role'],
-            'url' => $this->safeAssetUrl($asset['url'] ?? null, $requestId),
+            'url' => $this->safeAssetUrl($asset['url'] ?? null, $platform, $requestId),
             'thumbnail_url' => $this->safeAssetUrl(
                 $asset['thumbnail_url'] ?? null,
+                $platform,
                 $requestId,
                 true,
             ),
@@ -209,8 +234,11 @@ final class ExtractorClient
     /**
      * @return array<string, mixed>
      */
-    private function variant(mixed $variant, string $requestId): array
-    {
+    private function variant(
+        mixed $variant,
+        MediaPlatform $platform,
+        string $requestId,
+    ): array {
         if (
             ! is_array($variant)
             || ! in_array($variant['mime_type'] ?? null, ['video/mp4', 'application/x-mpegURL'], true)
@@ -221,7 +249,7 @@ final class ExtractorClient
         }
 
         return [
-            'url' => $this->safeAssetUrl($variant['url'] ?? null, $requestId),
+            'url' => $this->safeAssetUrl($variant['url'] ?? null, $platform, $requestId),
             'mime_type' => $variant['mime_type'],
             'protocol' => $variant['protocol'],
             'bitrate' => $this->nullablePositiveInt($variant['bitrate'] ?? null),
@@ -248,8 +276,46 @@ final class ExtractorClient
             && preg_match('#^/[A-Za-z0-9_]{1,15}/status/[0-9]{1,20}$#', (string) ($parts['path'] ?? '')) === 1;
     }
 
-    private function safeAssetUrl(mixed $url, string $requestId, bool $nullable = false): ?string
+    private function isSafeInstagramUrl(string $url, mixed $variant): bool
     {
+        $parts = parse_url($url);
+        $kind = $variant === 'reel' ? 'reel' : 'p';
+
+        return filter_var($url, FILTER_VALIDATE_URL) !== false
+            && is_array($parts)
+            && ($parts['scheme'] ?? null) === 'https'
+            && ($parts['host'] ?? null) === 'www.instagram.com'
+            && ! isset($parts['query'])
+            && ! isset($parts['fragment'])
+            && ! isset($parts['user'])
+            && ! isset($parts['pass'])
+            && ! isset($parts['port'])
+            && preg_match("#^/{$kind}/[A-Za-z0-9_-]{5,64}/$#", (string) ($parts['path'] ?? '')) === 1;
+    }
+
+    private function validReadyVariant(MediaPlatform $platform, mixed $variant): bool
+    {
+        return $platform === MediaPlatform::X
+            ? $variant === null
+            : in_array($variant, ['post', 'reel'], true);
+    }
+
+    private function isSafeReadyUrl(
+        MediaPlatform $platform,
+        string $url,
+        mixed $variant,
+    ): bool {
+        return $platform === MediaPlatform::X
+            ? $this->isSafeXPostUrl($url)
+            : $this->isSafeInstagramUrl($url, $variant);
+    }
+
+    private function safeAssetUrl(
+        mixed $url,
+        MediaPlatform $platform,
+        string $requestId,
+        bool $nullable = false,
+    ): ?string {
         if ($nullable && $url === null) {
             return null;
         }
@@ -259,11 +325,15 @@ final class ExtractorClient
         }
 
         $parts = parse_url($url);
+        $host = strtolower((string) ($parts['host'] ?? ''));
+        $allowedHost = $platform === MediaPlatform::X
+            ? in_array($host, ['pbs.twimg.com', 'video.twimg.com'], true)
+            : str_ends_with($host, '.cdninstagram.com') && $host !== 'cdninstagram.com';
         if (
             filter_var($url, FILTER_VALIDATE_URL) === false
             || ! is_array($parts)
             || ($parts['scheme'] ?? null) !== 'https'
-            || ! in_array($parts['host'] ?? null, ['pbs.twimg.com', 'video.twimg.com'], true)
+            || ! $allowedHost
             || isset($parts['user'])
             || isset($parts['pass'])
             || isset($parts['port'])
@@ -351,7 +421,7 @@ final class ExtractorClient
             && ! isset($parts['port']);
     }
 
-    private function validationMessage(string $code): string
+    private function validationMessage(string $code, mixed $provider = null): string
     {
         return match ($code) {
             'unsupported_scheme' => 'Only HTTP and HTTPS URLs are supported.',
@@ -360,8 +430,11 @@ final class ExtractorClient
             'unsupported_host' => 'This media host is not supported yet.',
             'url_too_long' => 'The media URL is too long.',
             'invalid_x_post_url' => 'Enter a valid X post URL.',
-            'no_media' => 'This public X post does not contain directly attached media.',
-            'post_unavailable' => 'This X post is unavailable or not public.',
+            'invalid_instagram_media_url' => 'Enter a valid Instagram post or reel URL.',
+            'no_media' => $provider === MediaPlatform::Instagram->value
+                ? 'This public Instagram post does not contain extractable media.'
+                : 'This public X post does not contain directly attached media.',
+            'post_unavailable' => 'This post is unavailable, private, or requires authentication.',
             default => 'Enter a valid media URL.',
         };
     }

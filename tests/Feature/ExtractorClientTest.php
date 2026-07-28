@@ -247,6 +247,56 @@ class ExtractorClientTest extends TestCase
             ->assertJsonPath('error.code', 'upstream_invalid_response');
     }
 
+    public function test_instagram_carousel_maps_to_safe_public_response(): void
+    {
+        Http::fake(function (Request $request) {
+            $requestId = $request->data()['request_id'];
+            $assets = [
+                self::instagramAsset('image', 1),
+                self::instagramAsset('video', 2),
+            ];
+
+            return Http::response([
+                'data' => [
+                    'request_id' => $requestId,
+                    'provider' => 'instagram',
+                    'provider_label' => 'Instagram',
+                    'provider_variant' => 'post',
+                    'media_type' => 'carousel',
+                    'source_url' => 'https://instagram.com/p/Code123/?utm_source=share',
+                    'normalized_url' => 'https://www.instagram.com/p/Code123/',
+                    'status' => 'ready',
+                    'metadata' => [
+                        'post_id' => 'Code123',
+                        'caption' => 'Public Instagram caption',
+                        'author_name' => 'Example Author',
+                        'author_handle' => 'example.author',
+                        'published_at' => '2026-07-28T12:00:00Z',
+                        'thumbnail_url' => $assets[0]['thumbnail_url'],
+                        'media_count' => 2,
+                    ],
+                    'assets' => $assets,
+                    'capabilities' => ['metadata', 'media_assets', 'multiple_assets'],
+                ],
+            ]);
+        });
+
+        $response = $this->postJson('/api/analyze', [
+            'url' => 'https://instagram.com/p/Code123/?utm_source=share',
+        ])->assertOk()
+            ->assertJsonPath('data.platform', 'instagram')
+            ->assertJsonPath('data.platform_label', 'Instagram')
+            ->assertJsonPath('data.media_type', 'carousel')
+            ->assertJsonPath('data.url', 'https://www.instagram.com/p/Code123/')
+            ->assertJsonPath('data.status', 'ready')
+            ->assertJsonCount(2, 'data.assets');
+
+        $this->assertStringNotContainsString('extractor:8000', $response->getContent());
+        foreach ($response->json('data.outputs') as $output) {
+            $this->assertFalse($output['available']);
+        }
+    }
+
     public function test_landing_and_health_do_not_depend_on_extractor_availability(): void
     {
         Http::fake(fn () => throw new ConnectionException('unavailable'));
@@ -363,6 +413,39 @@ class ExtractorClientTest extends TestCase
                 'quality_label' => '1280×720',
                 'is_preferred' => true,
             ]],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function instagramAsset(string $type, int $order): array
+    {
+        $base = "https://scontent-lhr8-1.cdninstagram.com/v/media-{$order}";
+        $url = $type === 'video' ? "{$base}.mp4" : "{$base}.jpg";
+
+        return [
+            'id' => "asset-{$order}",
+            'order' => $order,
+            'type' => $type,
+            'role' => $order === 1 ? 'primary' : 'gallery',
+            'url' => $url,
+            'thumbnail_url' => "{$base}.jpg",
+            'mime_type' => $type === 'video' ? 'video/mp4' : 'image/jpeg',
+            'width' => 1080,
+            'height' => 1350,
+            'duration_ms' => $type === 'video' ? 12000 : null,
+            'alt_text' => null,
+            'variants' => $type === 'video' ? [[
+                'url' => $url,
+                'mime_type' => 'video/mp4',
+                'protocol' => 'https',
+                'bitrate' => null,
+                'width' => 1080,
+                'height' => 1350,
+                'quality_label' => '1080×1350',
+                'is_preferred' => true,
+            ]] : [],
         ];
     }
 }

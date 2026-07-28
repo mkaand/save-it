@@ -12,6 +12,18 @@
     <meta property="og:description" content="Paste a supported media URL, analyze the available format plan, and keep recent fetches in your browser.">
     <meta property="og:url" content="https://save.allmy.win/">
     <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Save It">
+    <meta property="og:image" content="https://save.allmy.win/social/save-it-social-card.png">
+    <meta property="og:image:secure_url" content="https://save.allmy.win/social/save-it-social-card.png">
+    <meta property="og:image:type" content="image/png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Save It — media analysis made simple">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Save It — Download media. Keep it simple.">
+    <meta name="twitter:description" content="Analyze supported media URLs and keep recent previews in your browser. No account required.">
+    <meta name="twitter:image" content="https://save.allmy.win/social/save-it-social-card.png">
+    <meta name="twitter:image:alt" content="Save It — media analysis made simple">
     <link rel="canonical" href="https://save.allmy.win/">
     <link rel="icon" href="/favicon.ico" sizes="any">
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
@@ -38,6 +50,18 @@
         })();
     </script>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
+    @if (app()->environment('production')
+        && config('services.umami.enabled')
+        && config('services.umami.script_url') === 'https://stats.allmy.win/script.js'
+        && is_string(config('services.umami.website_id'))
+        && config('services.umami.website_id') !== '')
+        <script
+            defer
+            src="{{ config('services.umami.script_url') }}"
+            data-website-id="{{ config('services.umami.website_id') }}"
+            data-umami-enabled
+        ></script>
+    @endif
 </head>
 <body>
     <a class="skip-link" href="#main-content">Skip to content</a>
@@ -180,7 +204,7 @@
                         <p class="eyebrow"><span></span> Platform roadmap</p>
                         <h2 id="platform-heading">Recognized links, honest status.</h2>
                     </div>
-                    <p>X media extraction is available now. Download delivery and other providers remain on the roadmap.</p>
+                    <p>X and public Instagram media extraction are available now. Download delivery and other providers remain on the roadmap.</p>
                 </div>
 
                 <div class="platform-grid">
@@ -194,10 +218,10 @@
                         <div><h3>YouTube Shorts</h3><p>Short-form detection</p></div>
                         <span class="status-badge">Planned</span>
                     </article>
-                    <article class="platform-card">
+                    <article class="platform-card is-primary" data-instagram-extractor-available>
                         <span class="platform-icon-slot" data-platform-icon="instagram" aria-hidden="true">IG</span>
-                        <div><h3>Instagram</h3><p>Recognition only</p></div>
-                        <span class="status-badge">Planned</span>
+                        <div><h3>Instagram</h3><p>Post &amp; reel metadata</p></div>
+                        <span class="status-badge status-mvp">Available</span>
                     </article>
                     <article class="platform-card">
                         <span class="platform-icon-slot" data-platform-icon="tiktok" aria-hidden="true">TT</span>
@@ -296,6 +320,10 @@
                 <span>Save It</span>
             </a>
             <p class="footer-tagline">Simple media analysis, with less noise.</p>
+            <p class="footer-ai-notice">
+                Built with AI-assisted development support from OpenAI ChatGPT and OpenAI Codex.
+                No affiliation or partnership is implied.
+            </p>
             <nav aria-label="Footer navigation">
                 <a href="#platforms">Platforms</a>
                 <a href="#how-it-works">How it works</a>

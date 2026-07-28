@@ -21,7 +21,27 @@ function safeUrl(value, hosts) {
 }
 
 export function safeResultImageUrl(value) {
-    return safeUrl(value, IMAGE_HOSTS);
+    if (safeUrl(value, IMAGE_HOSTS)) {
+        return safeUrl(value, IMAGE_HOSTS);
+    }
+
+    if (typeof value !== 'string') {
+        return null;
+    }
+
+    try {
+        const parsed = new URL(value);
+        return parsed.protocol === 'https:'
+            && !parsed.username
+            && !parsed.password
+            && !parsed.port
+            && parsed.hostname.endsWith('.cdninstagram.com')
+            && parsed.hostname !== 'cdninstagram.com'
+            ? parsed.toString()
+            : null;
+    } catch {
+        return null;
+    }
 }
 
 export function safeXMediaUrl(value) {

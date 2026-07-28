@@ -17,6 +17,11 @@ class Settings:
     x_max_metadata_bytes: int = 3 * 1024 * 1024
     x_max_assets: int = 20
     x_max_variants: int = 12
+    instagram_connect_timeout_seconds: float = 3.0
+    instagram_read_timeout_seconds: float = 8.0
+    instagram_max_redirects: int = 2
+    instagram_max_metadata_bytes: int = 4 * 1024 * 1024
+    instagram_max_assets: int = 20
 
     @property
     def expose_docs(self) -> bool:

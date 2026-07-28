@@ -4,7 +4,8 @@
 
 The Save It extractor is an internal Docker-network service. Version 1 establishes
 request validation, provider recognition, adapter boundaries, and stable response
-shapes. PR #5 adds bounded public X metadata extraction. It does not download media,
+shapes. PR #5 adds bounded public X metadata extraction, and PR #6 adds bounded
+public Instagram post and reel metadata extraction. It does not download media,
 perform conversion, or execute shell commands.
 
 The Laravel application is the only intended client. The extractor has no published
@@ -64,6 +65,50 @@ For X, only status paths are valid. `x.com`, `www.x.com`, `twitter.com`,
 `https://x.com/<username>/status/<numeric-id>`. Share queries, fragments, and
 `/photo/N` or `/video/N` display suffixes are removed.
 
+For Instagram, only `/p/<shortcode>/` and `/reel/<shortcode>/` paths are valid.
+`instagram.com` and `www.instagram.com` normalize to
+`https://www.instagram.com/<kind>/<shortcode>/`. Share queries and fragments are
+removed. Stories, Live, profiles, Explore, and login-only URLs are rejected.
+
+## Instagram success response
+
+A public Instagram post or reel containing extractable media returns HTTP `200`.
+`provider_variant` is `post` or `reel`; `media_type` is `image`, `video`, `reel`,
+or `carousel`.
+
+```json
+{
+  "data": {
+    "request_id": "request-id",
+    "provider": "instagram",
+    "provider_label": "Instagram",
+    "provider_variant": "post",
+    "media_type": "carousel",
+    "source_url": "https://instagram.com/p/Code123/?utm_source=share",
+    "normalized_url": "https://www.instagram.com/p/Code123/",
+    "status": "ready",
+    "metadata": {
+      "post_id": "Code123",
+      "caption": "Public caption",
+      "author_name": "Example",
+      "author_handle": "example",
+      "published_at": "2026-07-28T12:00:00Z",
+      "thumbnail_url": "https://scontent.example.cdninstagram.com/image.jpg",
+      "media_count": 2
+    },
+    "assets": [],
+    "capabilities": ["metadata", "media_assets", "multiple_assets"]
+  }
+}
+```
+
+Assets retain Instagram's source order and contain only allowlisted HTTPS references
+returned by the public embed metadata. Image and video bodies are never fetched.
+Missing optional caption, author, timestamp, dimensions, duration, or alt text stays
+null; values are never invented. A valid public post without extractable media
+returns `422 no_media`. Private, removed, login-required, Story, and Live content is
+not supported. Asset URLs can expire and are not download links.
+
 ## X success response
 
 A public X status containing directly attached media returns HTTP `200` with a `data`
@@ -118,7 +163,7 @@ not download links; delivery remains PR #9 scope.
 
 ## Provider recognition response
 
-Instagram, YouTube, TikTok, Facebook, and LinkedIn remain controlled stubs. A
+YouTube, TikTok, Facebook, and LinkedIn remain controlled stubs. A
 recognized URL for one of them returns HTTP `501` with
 `provider_not_implemented`:
 
@@ -173,16 +218,17 @@ All errors use one machine-readable envelope:
 | 422 | `embedded_credentials` | URL contains user information |
 | 422 | `disallowed_port` | URL contains an explicit port |
 | 422 | `invalid_x_post_url` | X URL is not a canonicalizable status URL |
-| 422 | `no_media` | Public X post has no directly attached media |
+| 422 | `invalid_instagram_media_url` | Instagram URL is not a post or reel URL |
+| 422 | `no_media` | Public post has no extractable directly attached media |
 | 422 | `post_unavailable` | Post is unavailable, private, removed, or not public |
 | 501 | `provider_not_implemented` | Provider is recognized but its adapter is a stub |
-| 502 | `provider_response_changed` | X metadata shape or content type is invalid |
-| 502 | `provider_response_too_large` | X metadata exceeds the 3 MiB limit |
-| 502 | `disallowed_redirect` | Redirect or DNS result violates the X egress policy |
+| 502 | `provider_response_changed` | Provider metadata shape or content type is invalid |
+| 502 | `provider_response_too_large` | Provider metadata exceeds its bounded limit |
+| 502 | `disallowed_redirect` | Redirect or DNS result violates provider egress policy |
 | 500 | `internal_error` | Unexpected internal service failure |
-| 503 | `provider_timeout` | X exceeded the provider timeout |
-| 503 | `rate_limited_upstream` | X is rate limiting metadata requests |
-| 503 | `provider_blocked` | X denied the public metadata request |
+| 503 | `provider_timeout` | Provider exceeded its timeout |
+| 503 | `rate_limited_upstream` | Provider is rate limiting metadata requests |
+| 503 | `provider_blocked` | Provider denied the public metadata request |
 | 503 | `upstream_unavailable` | Provider dependency is temporarily unavailable |
 
 Stack traces, environment values, internal paths, headers, cookies, and secrets are
@@ -223,9 +269,9 @@ request ID, provider, status, and duration. Full submitted URLs, query strings,
 request bodies, cookies, and headers are not logged. Uvicorn access logging is
 disabled in production.
 
-## X network, privacy, and cache policy
+## Provider network, privacy, and cache policy
 
-Only the X adapter has outbound access. It constructs a metadata request from the
+The X adapter constructs a metadata request from the
 validated numeric status ID and permits `cdn.syndication.twimg.com` as the metadata
 host. Returned assets must use `pbs.twimg.com` or `video.twimg.com`. TLS verification
 is mandatory, proxy environment variables are ignored, every redirect target is
@@ -237,7 +283,16 @@ There is no extraction cache in PR #5. This avoids retaining expiring media URLs
 keeps invalidation explicit. Full URLs, queries, bodies, headers, cookies, and
 upstream payloads are not logged.
 
-The metadata host is fixed rather than user-controlled. DNS preflight narrows the
+The Instagram adapter constructs a canonical
+`https://www.instagram.com/<kind>/<shortcode>/embed/captioned/` request from the
+validated path. Only `www.instagram.com` may serve metadata. Returned asset
+references must use a strict `*.cdninstagram.com` suffix over verified HTTPS.
+Redirect targets and DNS answers are revalidated, redirects are capped at two,
+connect/read timeouts are three/eight seconds, and decompressed HTML is capped at
+4 MiB. Cookies are not persisted, proxy environment variables are ignored, and
+media bodies are never requested.
+
+Metadata hosts are fixed rather than user-controlled. DNS preflight narrows the
 baseline risk; connection pinning, centralized egress enforcement, DNS-rebinding
 defense, and cross-provider redirect policy remain PR #10 scope and are not claimed
 complete.
