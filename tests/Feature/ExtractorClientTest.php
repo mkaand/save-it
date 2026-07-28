@@ -297,6 +297,50 @@ class ExtractorClientTest extends TestCase
         }
     }
 
+    public function test_youtube_extraction_maps_formats_and_conversion_plan(): void
+    {
+        Http::fake(function (Request $request) {
+            return Http::response(
+                $this->youtubeSuccessResponse($request->data()['request_id']),
+            );
+        });
+
+        $response = $this->postJson('/api/analyze', [
+            'url' => 'https://m.youtube.com/watch?v=dQw4w9WgXcQ&list=PLignored',
+        ])->assertOk()
+            ->assertJsonPath('data.platform', 'youtube')
+            ->assertJsonPath('data.status', 'ready')
+            ->assertJsonPath('data.url', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ')
+            ->assertJsonPath('data.metadata.video_id', 'dQw4w9WgXcQ')
+            ->assertJsonPath('data.metadata.channel', 'Example Channel')
+            ->assertJsonPath('data.video_formats.0.video_codec_family', 'h264')
+            ->assertJsonPath('data.video_formats.0.requires_merge', true)
+            ->assertJsonPath('data.audio_formats.0.container', 'm4a')
+            ->assertJsonPath('data.conversion_plans.0.requires_ffmpeg', true)
+            ->assertJsonPath('data.conversion_plans.0.available', false);
+
+        foreach ($response->json('data.outputs') as $output) {
+            $this->assertFalse($output['available']);
+            $this->assertArrayNotHasKey('download_url', $output);
+        }
+        $this->assertStringNotContainsString('extractor:8000', $response->getContent());
+    }
+
+    public function test_invalid_youtube_format_contract_maps_to_safe_502(): void
+    {
+        Http::fake(function (Request $request) {
+            $payload = $this->youtubeSuccessResponse($request->data()['request_id']);
+            $payload['data']['metadata']['video_formats'][0]['format_id'] = '../unsafe';
+
+            return Http::response($payload);
+        });
+
+        $this->postJson('/api/analyze', [
+            'url' => 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+        ])->assertStatus(502)
+            ->assertJsonPath('error.code', 'upstream_invalid_response');
+    }
+
     public function test_landing_and_health_do_not_depend_on_extractor_availability(): void
     {
         Http::fake(fn () => throw new ConnectionException('unavailable'));
@@ -361,6 +405,80 @@ class ExtractorClientTest extends TestCase
                 ],
                 'assets' => $assets,
                 'capabilities' => ['metadata', 'media_assets', 'video_variants'],
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function youtubeSuccessResponse(string $requestId): array
+    {
+        return [
+            'data' => [
+                'request_id' => $requestId,
+                'provider' => 'youtube',
+                'provider_label' => 'YouTube',
+                'provider_variant' => 'video',
+                'media_type' => 'video',
+                'source_url' => 'https://m.youtube.com/watch?v=dQw4w9WgXcQ&list=PLignored',
+                'normalized_url' => 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+                'status' => 'ready',
+                'metadata' => [
+                    'video_id' => 'dQw4w9WgXcQ',
+                    'title' => 'Public YouTube video',
+                    'author_name' => 'Example Channel',
+                    'author_handle' => 'UCexample',
+                    'duration_ms' => 212000,
+                    'thumbnail_url' => 'https://i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg',
+                    'thumbnails' => [[
+                        'url' => 'https://i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg',
+                        'width' => 1280,
+                        'height' => 720,
+                        'preference' => 10,
+                    ]],
+                    'video_formats' => [[
+                        'format_id' => '137',
+                        'container' => 'mp4',
+                        'video_codec' => 'avc1.640028',
+                        'video_codec_family' => 'h264',
+                        'audio_codec' => null,
+                        'width' => 1920,
+                        'height' => 1080,
+                        'resolution' => '1920×1080',
+                        'fps' => 30,
+                        'bitrate_kbps' => 2500,
+                        'estimated_filesize' => 55000000,
+                        'has_audio' => false,
+                        'requires_merge' => true,
+                        'preference' => 0,
+                    ]],
+                    'audio_formats' => [[
+                        'format_id' => '140',
+                        'container' => 'm4a',
+                        'audio_codec' => 'mp4a.40.2',
+                        'bitrate_kbps' => 129,
+                        'sample_rate_hz' => 44100,
+                        'estimated_filesize' => 3400000,
+                        'language' => null,
+                        'preference' => 0,
+                    ]],
+                    'conversion_plans' => [[
+                        'id' => 'mp3',
+                        'label' => 'MP3',
+                        'source' => 'audio_format',
+                        'requires_ffmpeg' => true,
+                        'available' => false,
+                    ]],
+                ],
+                'assets' => [],
+                'capabilities' => [
+                    'metadata',
+                    'thumbnails',
+                    'video_formats',
+                    'audio_formats',
+                    'conversion_plans',
+                ],
             ],
         ];
     }

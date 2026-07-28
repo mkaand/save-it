@@ -37,7 +37,7 @@ return [
 
     'extractor' => [
         'base_url' => env('EXTRACTOR_BASE_URL', 'http://extractor:8000'),
-        'timeout_seconds' => (float) env('EXTRACTOR_TIMEOUT_SECONDS', 5),
+        'timeout_seconds' => (float) env('EXTRACTOR_TIMEOUT_SECONDS', 15),
         'connect_timeout_seconds' => (float) env('EXTRACTOR_CONNECT_TIMEOUT_SECONDS', 2),
     ],
 

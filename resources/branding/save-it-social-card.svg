@@ -7,9 +7,6 @@
     <path d="M78 42h20v55l24-24 14 14-48 48-48-48 14-14 24 24V42z" fill="#0b1220"/>
     <path d="M44 126v16h88v-16h18v24c0 6-5 10-10 10H36c-6 0-10-4-10-10v-24h18z" fill="#0b1220"/>
   </g>
-  <text x="330" y="222" fill="#f5f7fb" font-family="Arial, Helvetica, sans-serif" font-size="96" font-weight="800" letter-spacing="-4">Save It</text>
-  <text x="112" y="390" fill="#f5f7fb" font-family="Arial, Helvetica, sans-serif" font-size="54" font-weight="700">Download media. Keep it simple.</text>
-  <text x="112" y="458" fill="#a9b5c8" font-family="Arial, Helvetica, sans-serif" font-size="29">Fast, privacy-conscious media analysis. No account required.</text>
   <rect x="112" y="512" width="262" height="54" rx="27" fill="#c8ff3d"/>
-  <text x="145" y="548" fill="#0b1220" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="700">save.allmy.win</text>
+  <!-- SOCIAL_TEXT_PATHS -->
 </svg>

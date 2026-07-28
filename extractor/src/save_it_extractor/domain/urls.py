@@ -1,7 +1,7 @@
 import ipaddress
 import re
 from dataclasses import dataclass
-from urllib.parse import SplitResult, urlsplit, urlunsplit
+from urllib.parse import SplitResult, parse_qs, urlsplit, urlunsplit
 
 from save_it_extractor.domain.models import PROVIDER_LABELS, Provider, ProviderContext
 
@@ -76,12 +76,18 @@ def classify_url(raw_url: str, max_length: int = 2048) -> ProviderContext:
         else (
             _normalize_instagram_url(parsed)
             if provider is Provider.INSTAGRAM
-            else urlunsplit((parsed.scheme.lower(), hostname, parsed.path or "/", parsed.query, ""))
+            else (
+                _normalize_youtube_url(hostname, parsed)
+                if provider is Provider.YOUTUBE
+                else urlunsplit(
+                    (parsed.scheme.lower(), hostname, parsed.path or "/", parsed.query, "")
+                )
+            )
         )
     )
     variant = None
-    if provider is Provider.YOUTUBE and parsed.path.startswith("/shorts/"):
-        variant = "shorts"
+    if provider is Provider.YOUTUBE:
+        variant = "shorts" if "/shorts/" in normalized else "video"
     elif provider is Provider.INSTAGRAM:
         variant = "reel" if normalized.startswith("https://www.instagram.com/reel/") else "post"
 
@@ -98,6 +104,9 @@ X_STATUS_PATH = re.compile(
     r"^/([A-Za-z0-9_]{1,15})/status/([0-9]{1,20})(?:/(?:photo|video)/[1-9][0-9]*)?/?$"
 )
 INSTAGRAM_MEDIA_PATH = re.compile(r"^/(p|reel)/([A-Za-z0-9_-]{5,64})/?$")
+YOUTUBE_VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
+YOUTUBE_SHORTS_PATH = re.compile(r"^/shorts/([A-Za-z0-9_-]{11})/?$")
+YOUTUBE_SHORT_URL_PATH = re.compile(r"^/([A-Za-z0-9_-]{11})/?$")
 
 
 def _normalize_x_url(hostname: str, parsed: SplitResult) -> str:
@@ -122,6 +131,50 @@ def _normalize_instagram_url(parsed: SplitResult) -> str:
 
     kind, shortcode = match.groups()
     return f"https://www.instagram.com/{kind}/{shortcode}/"
+
+
+def _normalize_youtube_url(hostname: str, parsed: SplitResult) -> str:
+    if parsed.path == "/playlist":
+        raise UrlValidationError(
+            "playlist_not_supported",
+            "YouTube playlists are not supported. Submit a single video URL.",
+        )
+
+    if parsed.path.startswith(("/live/", "/embed/live_stream")):
+        raise UrlValidationError(
+            "live_not_supported",
+            "YouTube live and scheduled live videos are not supported.",
+        )
+
+    video_id: str | None = None
+    variant = "video"
+    if hostname == "youtu.be":
+        match = YOUTUBE_SHORT_URL_PATH.fullmatch(parsed.path)
+        video_id = match.group(1) if match else None
+    elif parsed.path == "/watch":
+        parameters = parse_qs(parsed.query, keep_blank_values=True)
+        candidates = parameters.get("v", [])
+        video_id = candidates[0] if len(candidates) == 1 else None
+        if video_id is None and "list" in parameters:
+            raise UrlValidationError(
+                "playlist_not_supported",
+                "YouTube playlists are not supported. Submit a single video URL.",
+            )
+    else:
+        match = YOUTUBE_SHORTS_PATH.fullmatch(parsed.path)
+        if match:
+            video_id = match.group(1)
+            variant = "shorts"
+
+    if video_id is None or YOUTUBE_VIDEO_ID.fullmatch(video_id) is None:
+        raise UrlValidationError(
+            "invalid_youtube_video_url",
+            "Enter a valid YouTube video or Shorts URL.",
+        )
+
+    if variant == "shorts":
+        return f"https://www.youtube.com/shorts/{video_id}"
+    return f"https://www.youtube.com/watch?v={video_id}"
 
 
 def _normalize_hostname(parsed: SplitResult) -> str:

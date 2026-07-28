@@ -127,3 +127,27 @@ test('does not persist expiring Instagram CDN thumbnails', () => {
     assert.equal(stored.items[0].thumbnailUrl, null);
     assert.equal(JSON.stringify(stored).includes('cdninstagram.com'), false);
 });
+
+test('stores YouTube history without format or conversion payloads', () => {
+    const storage = new MemoryStorage();
+    addRecentFetch(storage, {
+        ...item(1, 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'),
+        platform: 'youtube',
+        platformLabel: 'YouTube',
+        title: 'Public YouTube video',
+        thumbnailUrl: 'https://i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg',
+        video_formats: [{ format_id: '137', direct_url: 'must-not-persist' }],
+        audio_formats: [{ format_id: '140' }],
+        conversion_plans: [{ id: 'mp3' }],
+    });
+
+    const stored = JSON.parse(storage.getItem(RECENT_FETCHES_KEY));
+    assert.equal(stored.items[0].platform, 'youtube');
+    assert.equal(
+        stored.items[0].thumbnailUrl,
+        'https://i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg',
+    );
+    assert.equal(stored.items[0].video_formats, undefined);
+    assert.equal(stored.items[0].audio_formats, undefined);
+    assert.equal(stored.items[0].conversion_plans, undefined);
+});

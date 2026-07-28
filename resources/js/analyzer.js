@@ -16,6 +16,13 @@ import {
     safeResultImageUrl,
     xAssetLabel,
 } from './x-result.js';
+import {
+    formatDuration,
+    normalizeYouTubeAudioFormats,
+    normalizeYouTubeVideoFormats,
+    youtubeAudioFormatLabel,
+    youtubeVideoFormatLabel,
+} from './youtube-result.js';
 
 function browserStorage() {
     try {
@@ -174,6 +181,7 @@ export function initAnalyzer() {
         url.title = data.url;
         const outputLabel = element('p', 'output-label', 'Planned output options');
         const outputs = element('div', 'output-grid');
+        const isYouTube = ['youtube', 'youtube_shorts'].includes(data.platform);
         const assets = data.platform === 'x'
             ? normalizeXAssets(data.assets)
             : (data.platform === 'instagram' ? normalizeInstagramAssets(data.assets) : []);
@@ -219,6 +227,32 @@ export function initAnalyzer() {
             copy.append(assetLabel, assetGrid);
         }
 
+        if (isYouTube) {
+            const summary = element('div', 'youtube-summary');
+            const channel = data.metadata?.channel || 'Channel unavailable';
+            summary.append(
+                element('span', '', channel),
+                element('span', '', formatDuration(data.metadata?.duration_ms)),
+                element('span', '', `${data.video_formats?.length || 0} video formats`),
+                element('span', '', `${data.audio_formats?.length || 0} audio formats`),
+            );
+
+            const groups = element('div', 'youtube-format-groups');
+            const videoGroup = element('section', 'youtube-format-group');
+            const audioGroup = element('section', 'youtube-format-group');
+            videoGroup.append(element('h4', '', 'Video qualities'));
+            audioGroup.append(element('h4', '', 'Audio qualities'));
+
+            normalizeYouTubeVideoFormats(data.video_formats).slice(0, 10).forEach((format) => {
+                videoGroup.append(element('span', 'youtube-format-chip', youtubeVideoFormatLabel(format)));
+            });
+            normalizeYouTubeAudioFormats(data.audio_formats).slice(0, 8).forEach((format) => {
+                audioGroup.append(element('span', 'youtube-format-chip', youtubeAudioFormatLabel(format)));
+            });
+            groups.append(videoGroup, audioGroup);
+            copy.append(summary, groups);
+        }
+
         data.outputs.forEach((output) => {
             const button = element('button', 'output-option');
             button.type = 'button';
@@ -231,14 +265,12 @@ export function initAnalyzer() {
             outputs.append(button);
         });
 
+        copy.prepend(meta, title, url);
         copy.append(
-            meta,
-            title,
-            url,
             outputLabel,
             outputs,
                 element('p', 'output-note', data.status === 'ready'
-                    ? `${data.platform_label} metadata is ready. Secure download delivery arrives in a later step.`
+                    ? `${data.platform_label} metadata is ready. Download and stream merging arrive in PR #9.`
                     : 'This is a format preview. Download controls become available with the media engine.'),
         );
         resultPanel.append(media, copy);

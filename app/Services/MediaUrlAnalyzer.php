@@ -30,7 +30,12 @@ final class MediaUrlAnalyzer
 
         if (
             $recognition->status === 'ready'
-            && in_array($platform, [MediaPlatform::X, MediaPlatform::Instagram], true)
+            && in_array($platform, [
+                MediaPlatform::X,
+                MediaPlatform::Instagram,
+                MediaPlatform::YouTube,
+                MediaPlatform::YouTubeShorts,
+            ], true)
         ) {
             return $this->providerResult($recognition);
         }
@@ -65,6 +70,14 @@ final class MediaUrlAnalyzer
      */
     private function providerResult(ExtractorRecognition $recognition): array
     {
+        if (in_array(
+            $recognition->platform,
+            [MediaPlatform::YouTube, MediaPlatform::YouTubeShorts],
+            true,
+        )) {
+            return $this->youtubeResult($recognition);
+        }
+
         $metadata = $recognition->metadata ?? [];
         $text = $metadata['text'] ?? null;
         $handle = $metadata['author_handle'] ?? null;
@@ -102,6 +115,88 @@ final class MediaUrlAnalyzer
                 ],
                 $recognition->assets,
             ),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function youtubeResult(ExtractorRecognition $recognition): array
+    {
+        $metadata = $recognition->metadata ?? [];
+        $videoFormats = is_array($metadata['video_formats'] ?? null)
+            ? $metadata['video_formats']
+            : [];
+        $audioFormats = is_array($metadata['audio_formats'] ?? null)
+            ? $metadata['audio_formats']
+            : [];
+        $outputs = [];
+
+        foreach (array_slice($videoFormats, 0, 6) as $format) {
+            $resolution = is_string($format['resolution'] ?? null)
+                ? $format['resolution']
+                : 'Video';
+            $codec = strtoupper((string) ($format['video_codec_family'] ?? 'other'));
+            $merge = ($format['requires_merge'] ?? false)
+                ? ' · separate audio required'
+                : ' · includes audio';
+            $outputs[] = [
+                'id' => "youtube-video-{$format['format_id']}",
+                'label' => strtoupper((string) $format['container'])." {$resolution}",
+                'detail' => "{$codec}{$merge}",
+                'available' => false,
+            ];
+        }
+
+        foreach (array_slice($audioFormats, 0, 4) as $format) {
+            $bitrate = is_int($format['bitrate_kbps'] ?? null)
+                || is_float($format['bitrate_kbps'] ?? null)
+                ? ' · '.round($format['bitrate_kbps']).' kbps'
+                : '';
+            $outputs[] = [
+                'id' => "youtube-audio-{$format['format_id']}",
+                'label' => strtoupper((string) $format['container']).' audio',
+                'detail' => "{$format['audio_codec']}{$bitrate}",
+                'available' => false,
+            ];
+        }
+
+        $outputs[] = [
+            'id' => 'youtube-mp3-plan',
+            'label' => 'MP3',
+            'detail' => 'Requires FFmpeg conversion in PR #9',
+            'available' => false,
+        ];
+
+        if (is_string($metadata['thumbnail_url'] ?? null)) {
+            $outputs[] = [
+                'id' => 'youtube-thumbnail',
+                'label' => 'Thumbnail',
+                'detail' => 'Image delivery planned for PR #9',
+                'available' => false,
+            ];
+        }
+
+        return [
+            'platform' => $recognition->platform->value,
+            'platform_label' => $recognition->platform->label(),
+            'media_type' => $recognition->mediaType,
+            'url' => $recognition->normalizedUrl,
+            'title' => $metadata['title'],
+            'thumbnail_url' => $metadata['thumbnail_url'] ?? null,
+            'status' => 'ready',
+            'metadata' => [
+                'video_id' => $metadata['video_id'],
+                'channel' => $metadata['author_name'] ?? null,
+                'channel_id' => $metadata['author_handle'] ?? null,
+                'duration_ms' => $metadata['duration_ms'] ?? null,
+                'thumbnails' => $metadata['thumbnails'] ?? [],
+            ],
+            'video_formats' => $videoFormats,
+            'audio_formats' => $audioFormats,
+            'conversion_plans' => $metadata['conversion_plans'] ?? [],
+            'assets' => [],
+            'outputs' => $outputs,
         ];
     }
 

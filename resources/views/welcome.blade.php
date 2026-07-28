@@ -13,8 +13,8 @@
     <meta property="og:url" content="https://save.allmy.win/">
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="Save It">
-    <meta property="og:image" content="https://save.allmy.win/social/save-it-social-card.png">
-    <meta property="og:image:secure_url" content="https://save.allmy.win/social/save-it-social-card.png">
+    <meta property="og:image" content="https://save.allmy.win/social/save-it-social-card-v2.png">
+    <meta property="og:image:secure_url" content="https://save.allmy.win/social/save-it-social-card-v2.png">
     <meta property="og:image:type" content="image/png">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
@@ -22,7 +22,7 @@
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Save It — Download media. Keep it simple.">
     <meta name="twitter:description" content="Analyze supported media URLs and keep recent previews in your browser. No account required.">
-    <meta name="twitter:image" content="https://save.allmy.win/social/save-it-social-card.png">
+    <meta name="twitter:image" content="https://save.allmy.win/social/save-it-social-card-v2.png">
     <meta name="twitter:image:alt" content="Save It — media analysis made simple">
     <link rel="canonical" href="https://save.allmy.win/">
     <link rel="icon" href="/favicon.ico" sizes="any">
@@ -204,19 +204,19 @@
                         <p class="eyebrow"><span></span> Platform roadmap</p>
                         <h2 id="platform-heading">Recognized links, honest status.</h2>
                     </div>
-                    <p>X and public Instagram media extraction are available now. Download delivery and other providers remain on the roadmap.</p>
+                    <p>YouTube, X, and public Instagram analysis are available now. Download delivery and other providers remain on the roadmap.</p>
                 </div>
 
                 <div class="platform-grid">
-                    <article class="platform-card">
+                    <article class="platform-card is-primary" data-youtube-extractor-available>
                         <span class="platform-icon-slot" data-platform-icon="youtube" aria-hidden="true">YT</span>
-                        <div><h3>YouTube</h3><p>Video URL preview</p></div>
-                        <span class="status-badge">Planned</span>
+                        <div><h3>YouTube</h3><p>Formats &amp; metadata</p></div>
+                        <span class="status-badge status-mvp">Available</span>
                     </article>
-                    <article class="platform-card">
+                    <article class="platform-card is-primary" data-youtube-shorts-extractor-available>
                         <span class="platform-icon-slot" data-platform-icon="youtube_shorts" aria-hidden="true">YS</span>
-                        <div><h3>YouTube Shorts</h3><p>Short-form detection</p></div>
-                        <span class="status-badge">Planned</span>
+                        <div><h3>YouTube Shorts</h3><p>Short-form formats</p></div>
+                        <span class="status-badge status-mvp">Available</span>
                     </article>
                     <article class="platform-card is-primary" data-instagram-extractor-available>
                         <span class="platform-icon-slot" data-platform-icon="instagram" aria-hidden="true">IG</span>

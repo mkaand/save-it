@@ -10,33 +10,37 @@ use Tests\TestCase;
 class AnalyzeEndpointTest extends TestCase
 {
     /**
-     * @return array<string, array{string, string, string}>
+     * @return array<string, array{string, string, string, string}>
      */
     public static function supportedUrlProvider(): array
     {
         return [
-            'YouTube watch' => ['https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'youtube', 'YouTube'],
-            'YouTube short link' => ['https://youtu.be/dQw4w9WgXcQ', 'youtube', 'YouTube'],
-            'YouTube Shorts' => ['https://www.youtube.com/shorts/abc123DEF45', 'youtube_shorts', 'YouTube Shorts'],
-            'Instagram' => ['https://www.instagram.com/p/example/', 'instagram', 'Instagram'],
-            'TikTok' => ['https://www.tiktok.com/@creator/video/123456', 'tiktok', 'TikTok'],
-            'X' => ['https://x.com/saveit/status/123456', 'x', 'X'],
-            'Twitter' => ['https://twitter.com/saveit/status/123456', 'x', 'X'],
-            'Facebook' => ['https://www.facebook.com/watch/?v=123456', 'facebook', 'Facebook'],
-            'LinkedIn' => ['https://www.linkedin.com/posts/example', 'linkedin', 'LinkedIn'],
+            'YouTube watch' => ['https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'youtube', 'YouTube', 'ready'],
+            'YouTube short link' => ['https://youtu.be/dQw4w9WgXcQ', 'youtube', 'YouTube', 'ready'],
+            'YouTube Shorts' => ['https://www.youtube.com/shorts/abc123DEF45', 'youtube_shorts', 'YouTube Shorts', 'ready'],
+            'Instagram' => ['https://www.instagram.com/p/example/', 'instagram', 'Instagram', 'preview'],
+            'TikTok' => ['https://www.tiktok.com/@creator/video/123456', 'tiktok', 'TikTok', 'preview'],
+            'X' => ['https://x.com/saveit/status/123456', 'x', 'X', 'preview'],
+            'Twitter' => ['https://twitter.com/saveit/status/123456', 'x', 'X', 'preview'],
+            'Facebook' => ['https://www.facebook.com/watch/?v=123456', 'facebook', 'Facebook', 'preview'],
+            'LinkedIn' => ['https://www.linkedin.com/posts/example', 'linkedin', 'LinkedIn', 'preview'],
         ];
     }
 
     #[DataProvider('supportedUrlProvider')]
-    public function test_it_analyzes_supported_urls(string $url, string $platform, string $label): void
-    {
+    public function test_it_analyzes_supported_urls(
+        string $url,
+        string $platform,
+        string $label,
+        string $status,
+    ): void {
         $this->fakeRecognition($url, $platform);
 
         $this->postJson('/api/analyze', ['url' => $url])
             ->assertOk()
             ->assertJsonPath('data.platform', $platform)
             ->assertJsonPath('data.platform_label', $label)
-            ->assertJsonPath('data.status', 'preview')
+            ->assertJsonPath('data.status', $status)
             ->assertJsonStructure([
                 'data' => [
                     'platform',
@@ -70,31 +74,84 @@ class AnalyzeEndpointTest extends TestCase
             ->assertJsonPath('data.platform', 'instagram');
     }
 
-    public function test_it_normalizes_youtube_urls_and_derives_only_a_valid_thumbnail(): void
+    public function test_it_normalizes_youtube_urls(): void
     {
         $this->fakeRecognition(
-            'http://youtu.be/dQw4w9WgXcQ?feature=shared#fragment',
+            'https://youtu.be/dQw4w9WgXcQ?feature=shared#fragment',
             'youtube',
-            'http://youtu.be/dQw4w9WgXcQ?feature=shared',
+            'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
         );
 
         $this->postJson('/api/analyze', [
-            'url' => 'http://youtu.be/dQw4w9WgXcQ?feature=shared#fragment',
+            'url' => 'https://youtu.be/dQw4w9WgXcQ?feature=shared#fragment',
         ])
             ->assertOk()
             ->assertJsonPath('data.url', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ')
-            ->assertJsonPath('data.thumbnail_url', 'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg');
+            ->assertJsonPath('data.thumbnail_url', 'https://i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg');
+    }
 
-        $this->fakeRecognition(
-            'https://www.youtube.com/watch?v=invalid',
-            'youtube',
-        );
+    public function test_it_rejects_invalid_youtube_video_ids(): void
+    {
+        Http::fake([
+            'http://extractor:8000/*' => Http::response([
+                'error' => [
+                    'code' => 'invalid_youtube_video_url',
+                    'message' => 'Internal wording.',
+                    'request_id' => 'youtube-error',
+                    'details' => ['provider' => 'youtube'],
+                ],
+            ], 422),
+        ]);
 
         $this->postJson('/api/analyze', [
             'url' => 'https://www.youtube.com/watch?v=invalid',
         ])
-            ->assertOk()
-            ->assertJsonPath('data.thumbnail_url', null);
+            ->assertUnprocessable()
+            ->assertJsonPath('errors.url.0', 'Enter a valid YouTube video or Shorts URL.');
+    }
+
+    public function test_it_rejects_playlist_only_youtube_urls(): void
+    {
+        Http::fake([
+            'http://extractor:8000/*' => Http::response([
+                'error' => [
+                    'code' => 'playlist_not_supported',
+                    'message' => 'Internal wording.',
+                    'request_id' => 'youtube-error',
+                    'details' => ['provider' => 'youtube'],
+                ],
+            ], 422),
+        ]);
+
+        $this->postJson('/api/analyze', [
+            'url' => 'https://www.youtube.com/playlist?list=PLexample',
+        ])->assertUnprocessable()
+            ->assertJsonPath(
+                'errors.url.0',
+                'YouTube playlists are not supported. Submit a single video URL.',
+            );
+    }
+
+    public function test_it_rejects_live_youtube_urls(): void
+    {
+        Http::fake([
+            'http://extractor:8000/*' => Http::response([
+                'error' => [
+                    'code' => 'live_not_supported',
+                    'message' => 'Internal wording.',
+                    'request_id' => 'youtube-error',
+                    'details' => ['provider' => 'youtube'],
+                ],
+            ], 422),
+        ]);
+
+        $this->postJson('/api/analyze', [
+            'url' => 'https://www.youtube.com/live/dQw4w9WgXcQ',
+        ])->assertUnprocessable()
+            ->assertJsonPath(
+                'errors.url.0',
+                'YouTube live and scheduled live videos are not supported.',
+            );
     }
 
     public function test_no_preview_output_claims_to_be_available(): void
@@ -199,6 +256,15 @@ class AnalyzeEndpointTest extends TestCase
         ) {
             $requestedUrl = $request->data()['url'];
             $requestId = $request->data()['request_id'];
+            $effectiveUrl = $requestedUrl === $sourceUrl
+                ? ($normalizedUrl ?? $sourceUrl)
+                : $requestedUrl;
+
+            if ($provider === 'youtube') {
+                return Http::response(
+                    $this->youtubeSuccessResponse($requestId, $effectiveUrl, $variant),
+                );
+            }
 
             return Http::response([
                 'error' => [
@@ -210,9 +276,7 @@ class AnalyzeEndpointTest extends TestCase
                         'provider_label' => ucfirst($provider),
                         'provider_variant' => $variant,
                         'media_type' => 'unknown',
-                        'normalized_url' => $requestedUrl === $sourceUrl
-                            ? ($normalizedUrl ?? $sourceUrl)
-                            : $requestedUrl,
+                        'normalized_url' => $effectiveUrl,
                         'status' => 'not_implemented',
                         'metadata' => null,
                         'assets' => [],
@@ -221,5 +285,88 @@ class AnalyzeEndpointTest extends TestCase
                 ],
             ], 501);
         });
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function youtubeSuccessResponse(
+        string $requestId,
+        string $normalizedUrl,
+        ?string $variant,
+    ): array {
+        preg_match('/(?:v=|shorts\/)([A-Za-z0-9_-]{11})/', $normalizedUrl, $matches);
+        $videoId = $matches[1] ?? 'dQw4w9WgXcQ';
+        $canonical = $variant === 'shorts'
+            ? "https://www.youtube.com/shorts/{$videoId}"
+            : "https://www.youtube.com/watch?v={$videoId}";
+
+        return [
+            'data' => [
+                'request_id' => $requestId,
+                'provider' => 'youtube',
+                'provider_label' => 'YouTube',
+                'provider_variant' => $variant ?? 'video',
+                'media_type' => $variant === 'shorts' ? 'short_video' : 'video',
+                'source_url' => $normalizedUrl,
+                'normalized_url' => $canonical,
+                'status' => 'ready',
+                'metadata' => [
+                    'video_id' => $videoId,
+                    'title' => 'Public YouTube video',
+                    'author_name' => 'Example Channel',
+                    'author_handle' => 'UCexample',
+                    'duration_ms' => 212000,
+                    'thumbnail_url' => "https://i.ytimg.com/vi/{$videoId}/maxresdefault.jpg",
+                    'thumbnails' => [[
+                        'url' => "https://i.ytimg.com/vi/{$videoId}/maxresdefault.jpg",
+                        'width' => 1280,
+                        'height' => 720,
+                        'preference' => 10,
+                    ]],
+                    'video_formats' => [[
+                        'format_id' => '137',
+                        'container' => 'mp4',
+                        'video_codec' => 'avc1.640028',
+                        'video_codec_family' => 'h264',
+                        'audio_codec' => null,
+                        'width' => 1920,
+                        'height' => 1080,
+                        'resolution' => '1920×1080',
+                        'fps' => 30,
+                        'bitrate_kbps' => 2500,
+                        'estimated_filesize' => 55000000,
+                        'has_audio' => false,
+                        'requires_merge' => true,
+                        'preference' => 0,
+                    ]],
+                    'audio_formats' => [[
+                        'format_id' => '140',
+                        'container' => 'm4a',
+                        'audio_codec' => 'mp4a.40.2',
+                        'bitrate_kbps' => 129,
+                        'sample_rate_hz' => 44100,
+                        'estimated_filesize' => 3400000,
+                        'language' => null,
+                        'preference' => 0,
+                    ]],
+                    'conversion_plans' => [[
+                        'id' => 'mp3',
+                        'label' => 'MP3',
+                        'source' => 'audio_format',
+                        'requires_ffmpeg' => true,
+                        'available' => false,
+                    ]],
+                ],
+                'assets' => [],
+                'capabilities' => [
+                    'metadata',
+                    'thumbnails',
+                    'video_formats',
+                    'audio_formats',
+                    'conversion_plans',
+                ],
+            ],
+        ];
     }
 }

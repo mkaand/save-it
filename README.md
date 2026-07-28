@@ -2,9 +2,10 @@
 
 Save It is a privacy-conscious media URL analysis experience built with Laravel 12 and PHP 8.2. The public application runs at `https://save.allmy.win`.
 
-PR #6 adds real, metadata-only extraction for public Instagram posts and reels while
-retaining the public X extractor. It supports Instagram single images, videos,
-reels, and ordered carousels. Media file delivery is not implemented yet.
+PR #7 adds metadata-only YouTube video and Shorts analysis through the internal
+extractor. It returns validated thumbnails, ordered video and audio format metadata,
+and an explicit MP3 conversion plan. Media file delivery and FFmpeg conversion are
+not implemented yet.
 
 ## Current capabilities
 
@@ -13,13 +14,13 @@ reels, and ordered carousels. Media file delivery is not implemented yet.
 - Local platform brand glyphs with no runtime third-party requests
 - Anonymous use with no accounts or authentication
 - URL recognition for YouTube, YouTube Shorts, Instagram, TikTok, X/Twitter, Facebook, and LinkedIn
-- Stable preview metadata and planned output options
-- Deterministic YouTube thumbnails for validated 11-character video IDs
+- Real metadata analysis for public YouTube videos and Shorts
+- Validated YouTube thumbnails, ordered MP4/WebM video formats, and M4A/WebM audio formats
 - Five browser-local Recent Fetches stored in `localStorage`
 - Stateless JSON health endpoint
 - Docker services for PHP-FPM, Nginx, Redis, the queue worker, and scheduler
 - Internal Python 3.12 extractor service with FastAPI, Pydantic, and versioned API v1
-- Exact-host provider registry with X and Instagram adapters and controlled stubs for other providers
+- Exact-host provider registry with X, Instagram, and YouTube adapters and controlled stubs for other providers
 - X public post metadata, ordered assets, and source video variants
 - Instagram public post/reel metadata and ordered image/video carousel assets
 - Open Graph, Twitter Card, robots, sitemap, manifest, and local social-preview assets
@@ -33,7 +34,7 @@ Platform labels describe the current implementation:
 
 - X: public media extraction available; download delivery remains planned
 - Instagram: public post and reel extraction available; download delivery remains planned
-- YouTube and YouTube Shorts: URL previews; extraction remains planned
+- YouTube and YouTube Shorts: public metadata and format analysis available; download delivery remains planned
 - LinkedIn: Beta URL recognition
 - TikTok and Facebook: URL recognition; extraction is planned
 
@@ -55,7 +56,8 @@ The endpoint delegates authoritative provider recognition to the internal extrac
 - rejects embedded credentials, custom ports, localhost, and IP address URLs;
 - does not fetch arbitrary submitted URLs, run shell commands, create jobs, or store history;
 - permits X and Instagram adapters to fetch canonical, service-constructed metadata URLs;
-- returns real X/Instagram metadata or normalized previews for stubs, with download controls unavailable;
+- submits only strictly canonical YouTube video URLs to the pinned yt-dlp library API;
+- returns real X, Instagram, and YouTube metadata or normalized previews for stubs, with download controls unavailable;
 - is limited to 30 requests per minute per client IP.
 
 Laravel calls `POST http://extractor:8000/v1/extract` with explicit connect and total
@@ -92,7 +94,8 @@ metadata from `cdn.syndication.twimg.com`, and emits allowlisted
 `pbs.twimg.com`/`video.twimg.com` asset references. The Instagram adapter accepts only
 post and reel paths, fetches bounded public embed metadata from `www.instagram.com`,
 and emits allowlisted `*.cdninstagram.com` asset references. Other adapters remain
-`not_implemented` stubs.
+`not_implemented` stubs. The YouTube adapter accepts only canonical video and Shorts
+URLs and uses the pinned yt-dlp Python library API in metadata-only mode.
 
 The service uses these non-secret settings:
 
@@ -111,7 +114,9 @@ Structured logs include correlation and timing fields but omit full URLs, query
 strings, headers, cookies, and bodies. Provider clients use verified TLS, ignore proxy
 environment variables, validate DNS results and each redirect target, limit
 redirects and decompressed response size, and do not fetch media binaries. The
-service contains no shell invocation, yt-dlp, FFmpeg, or download path.
+YouTube client disables playlists, cookies, downloads, subtitles, remote components,
+and environment proxies. It returns safe format identifiers rather than direct media
+URLs. The service contains no shell invocation, FFmpeg, or download path.
 
 Run Python checks in an isolated Python 3.12 environment:
 
@@ -136,8 +141,23 @@ SAVE_IT_RUN_INSTAGRAM_LIVE_TESTS=1 PYTHONPATH=src pytest -m live \
 The checked-in Instagram tests otherwise use deterministic metadata fixtures and
 mock transports. No credentials, cookies, or private content are required.
 
-YouTube and LinkedIn remain planned for PRs #7 and #8. PR #10 still owns centralized egress,
-DNS-rebinding, and redirect-chain hardening beyond the X-specific baseline.
+LinkedIn remains planned for PR #8. PR #10 still owns centralized egress,
+DNS-rebinding, and redirect-chain hardening beyond provider-specific baselines.
+
+## YouTube analysis
+
+The YouTube adapter accepts `youtube.com/watch?v=<video-id>` on the standard,
+`www`, `m`, and `music` hosts, `youtu.be/<video-id>`, and
+`youtube.com/shorts/<video-id>`. A video URL containing playlist parameters is
+analyzed as one video and normalized without those parameters.
+
+Playlist-only, live, scheduled live, private, authentication-required,
+age-restricted, and DRM-protected content is rejected with a safe error. Video
+formats are ordered as MP4/H.264, MP4/H.265, other MP4, then WebM alternatives.
+Audio-only M4A options precede WebM alternatives. Each format may include codec,
+resolution, FPS, bitrate, estimated size, and whether a separate audio stream must be
+merged. MP3 is a disabled plan that explicitly requires FFmpeg in PR #9; it is not a
+direct media URL.
 
 ## Recent Fetches
 
@@ -164,22 +184,22 @@ Invalid or unavailable browser storage safely falls back to system mode. Theme s
 
 ## Current limitations
 
-The following are intentionally not implemented in PR #6:
+The following are intentionally not implemented in PR #7:
 
-- yt-dlp, FFmpeg, download, or conversion engines
+- FFmpeg, download, or conversion engines
 - functional media download links
-- real duration, size, quality, creator, or channel metadata
 - playlists and livestreams
 - queue-backed analysis jobs
 - server-side Recent Fetches persistence
 - cross-browser or cross-device history synchronization
-- YouTube, TikTok, Facebook, or LinkedIn extraction logic
+- TikTok, Facebook, or LinkedIn extraction logic
 - Instagram Stories, Live, private, or login-required extraction
 - X private/protected posts or authenticated extraction
 - media file delivery, URL proxying, or expired asset URL renewal
 - centralized PR #10 egress and DNS-rebinding controls
 
-Planned YouTube outputs are MP4 with an H.264 compatibility preference, M4A, MP3 conversion, and thumbnail download. They remain disabled previews until the media engine is implemented.
+YouTube format identifiers and metadata are real analysis results, but all delivery
+controls remain disabled until PR #9.
 
 ## Technology and services
 
@@ -190,7 +210,7 @@ Planned YouTube outputs are MP4 with an H.264 compatibility preference, M4A, MP3
 - Redis for cache, sessions, and queues
 - Docker Compose services: `app`, `nginx`, `redis`, `worker`, `scheduler`, and the
   internal-only `extractor`
-- Python 3.12, FastAPI 0.140.7, Pydantic 2.13.4, HTTPX 0.28.1, and Uvicorn 0.51.0
+- Python 3.12, FastAPI 0.140.7, Pydantic 2.13.4, HTTPX 0.28.1, Uvicorn 0.51.0, and yt-dlp 2026.7.4
 - Simple Icons `16.27.1` as an exact development dependency for selected local brand glyphs
 
 Nginx is published only on `127.0.0.1:8099`. Redis has no host port.
@@ -246,8 +266,10 @@ or blocked analytics script never blocks the application.
 - `public/robots.txt` allows indexing and points to `public/sitemap.xml`.
 - `public/site.webmanifest`, local favicons, Apple Touch Icon, and PWA icons are
   generated from repository-owned assets.
-- `resources/branding/save-it-social-card.svg` generates the local 1200×630 Open
-  Graph/Twitter preview image during `npm run generate:icons`.
+- `resources/branding/save-it-social-card.svg` and the pinned local Inter package
+  generate a path-only 1200×630 Open Graph/Twitter preview during
+  `npm run generate:icons`. The current version is
+  `/social/save-it-social-card-v2.png`; the original URL remains for compatibility.
 
 The `.env.example` extractor URL points only to the internal Compose service. Do not
 publish the extractor port or derive its base URL from submitted media URLs.
@@ -324,8 +346,10 @@ runtime audit, Docker Compose, all changed images, and matching app/Nginx manife
 
 ## SEO, social previews, and analytics
 
-The landing page publishes canonical, Open Graph, and Twitter Card metadata with a
-local 1200×630 Save It preview image. The same standards-based tags are suitable for
+The landing page publishes canonical, Open Graph, and Twitter Card metadata with the
+versioned local 1200×630 Save It preview image. Its text is converted from the pinned
+local Inter package to SVG glyph paths before Sharp renders the PNG, so CI and
+container builds do not depend on system fonts. The same standards-based tags are suitable for
 X, Facebook, LinkedIn, Telegram, WhatsApp, and Discord link unfurlers without a
 runtime social API. `robots.txt`, `sitemap.xml`, the web app manifest, favicons, and
 theme metadata are served locally.
@@ -343,6 +367,10 @@ package under CC0-1.0. The local LinkedIn fallback uses the CC0 Simple Icons gly
 shape retained for compatibility. Brand names and marks belong to their respective
 owners. Their presence describes functionality or links to source code and does not
 imply affiliation, endorsement, or partnership.
+
+Inter is used only at build time to create deterministic social-card glyph paths.
+The pinned `@fontsource/inter` package distributes Inter under the SIL Open Font
+License 1.1.
 
 ## AI-assisted development
 
