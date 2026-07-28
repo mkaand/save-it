@@ -68,7 +68,7 @@ function updateThemeColor(theme) {
     }
 }
 
-function setControlState(toggle, systemButton, mode, theme) {
+export function setControlState(toggle, systemButton, mode, theme) {
     if (toggle) {
         const switchesTo = theme === 'dark' ? 'light' : 'dark';
         toggle.setAttribute('aria-checked', String(theme === 'dark'));
@@ -79,9 +79,8 @@ function setControlState(toggle, systemButton, mode, theme) {
     if (systemButton) {
         const followsSystem = mode === 'system';
         systemButton.setAttribute('aria-pressed', String(followsSystem));
-        systemButton.title = followsSystem
-            ? 'Following system theme'
-            : 'Use system theme';
+        systemButton.setAttribute('aria-label', 'Use automatic system theme');
+        systemButton.title = 'Use automatic system theme';
     }
 }
 

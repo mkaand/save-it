@@ -12,6 +12,10 @@
 /.phpunit.cache
 /.vscode
 /.zed
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.py[cod]
 /auth.json
 /node_modules
 /database/*.sqlite

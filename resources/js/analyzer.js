@@ -265,6 +265,7 @@ export function initAnalyzer() {
             if (!response.ok) {
                 const message = payload?.errors?.url?.[0]
                     || (response.status === 429 ? 'Too many analysis requests. Please wait a moment.' : null)
+                    || payload?.error?.message
                     || payload?.message
                     || 'The URL could not be analyzed right now.';
                 throw new Error(message);

@@ -3,36 +3,11 @@
 namespace App\Services;
 
 use App\Enums\MediaPlatform;
-use InvalidArgumentException;
+use App\Services\Extractor\ExtractorClient;
 
 final class MediaUrlAnalyzer
 {
-    /**
-     * @var array<string, MediaPlatform>
-     */
-    private const HOSTS = [
-        'youtube.com' => MediaPlatform::YouTube,
-        'www.youtube.com' => MediaPlatform::YouTube,
-        'm.youtube.com' => MediaPlatform::YouTube,
-        'music.youtube.com' => MediaPlatform::YouTube,
-        'youtu.be' => MediaPlatform::YouTube,
-        'instagram.com' => MediaPlatform::Instagram,
-        'www.instagram.com' => MediaPlatform::Instagram,
-        'tiktok.com' => MediaPlatform::TikTok,
-        'www.tiktok.com' => MediaPlatform::TikTok,
-        'vm.tiktok.com' => MediaPlatform::TikTok,
-        'vt.tiktok.com' => MediaPlatform::TikTok,
-        'x.com' => MediaPlatform::X,
-        'www.x.com' => MediaPlatform::X,
-        'twitter.com' => MediaPlatform::X,
-        'www.twitter.com' => MediaPlatform::X,
-        'facebook.com' => MediaPlatform::Facebook,
-        'www.facebook.com' => MediaPlatform::Facebook,
-        'm.facebook.com' => MediaPlatform::Facebook,
-        'fb.watch' => MediaPlatform::Facebook,
-        'linkedin.com' => MediaPlatform::LinkedIn,
-        'www.linkedin.com' => MediaPlatform::LinkedIn,
-    ];
+    public function __construct(private readonly ExtractorClient $extractor) {}
 
     /**
      * @return array{
@@ -48,49 +23,19 @@ final class MediaUrlAnalyzer
      */
     public function analyze(string $input): array
     {
-        $url = trim($input);
-
-        if ($url === '' || filter_var($url, FILTER_VALIDATE_URL) === false) {
-            throw new InvalidArgumentException('Enter a valid media URL.');
-        }
-
-        $parts = parse_url($url);
-
-        if ($parts === false || ! isset($parts['scheme'], $parts['host'])) {
-            throw new InvalidArgumentException('Enter a valid media URL.');
-        }
-
-        $scheme = strtolower($parts['scheme']);
-
-        if (! in_array($scheme, ['http', 'https'], true)) {
-            throw new InvalidArgumentException('Only HTTP and HTTPS URLs are supported.');
-        }
-
-        if (isset($parts['user']) || isset($parts['pass'])) {
-            throw new InvalidArgumentException('URLs containing embedded credentials are not allowed.');
-        }
-
-        if (isset($parts['port'])) {
-            throw new InvalidArgumentException('URLs with custom ports are not supported.');
-        }
-
-        $host = strtolower(rtrim(trim($parts['host'], '[]'), '.'));
-        $this->assertSafeHost($host);
-
-        $platform = self::HOSTS[$host] ?? null;
-
-        if ($platform === null) {
-            throw new InvalidArgumentException('This media host is not supported yet.');
-        }
-
-        $path = $parts['path'] ?? '/';
-
-        if ($platform === MediaPlatform::YouTube && str_starts_with($path, '/shorts/')) {
-            $platform = MediaPlatform::YouTubeShorts;
-        }
-
+        $recognition = $this->extractor->recognize(trim($input));
+        $platform = $recognition->platform;
+        $parts = parse_url($recognition->normalizedUrl);
+        $host = strtolower((string) ($parts['host'] ?? ''));
+        $path = (string) ($parts['path'] ?? '/');
         $videoId = $this->youtubeVideoId($host, $path, $parts['query'] ?? null);
-        $normalizedUrl = $this->normalizedUrl($host, $path, $parts['query'] ?? null, $platform, $videoId);
+        $normalizedUrl = $this->normalizedUrl(
+            $host,
+            $path,
+            $parts['query'] ?? null,
+            $platform,
+            $videoId,
+        );
 
         return [
             'platform' => $platform->value,
@@ -102,21 +47,6 @@ final class MediaUrlAnalyzer
             'status' => 'preview',
             'outputs' => $this->outputs($platform),
         ];
-    }
-
-    private function assertSafeHost(string $host): void
-    {
-        if ($host === '' || $host === 'localhost' || str_ends_with($host, '.localhost')) {
-            throw new InvalidArgumentException('Local and private addresses are not allowed.');
-        }
-
-        if (filter_var($host, FILTER_VALIDATE_IP) !== false) {
-            throw new InvalidArgumentException('IP address URLs are not allowed.');
-        }
-
-        if (filter_var($host, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) === false) {
-            throw new InvalidArgumentException('Enter a URL with a valid hostname.');
-        }
     }
 
     private function youtubeVideoId(string $host, string $path, ?string $query): ?string

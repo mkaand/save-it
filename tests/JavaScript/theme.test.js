@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
     readThemeMode,
     resolveTheme,
+    setControlState,
     THEME_STORAGE_KEY,
     writeThemeMode,
 } from '../../resources/js/theme.js';
@@ -67,4 +68,22 @@ test('blocked storage falls back without throwing', () => {
 
     assert.equal(readThemeMode(blocked), 'system');
     assert.equal(writeThemeMode(blocked, 'dark'), false);
+});
+
+test('automatic control exposes its state and accessible label', () => {
+    const attributes = new Map();
+    const systemButton = {
+        title: '',
+        setAttribute(name, value) {
+            attributes.set(name, value);
+        },
+    };
+
+    setControlState(null, systemButton, 'system', 'dark');
+    assert.equal(attributes.get('aria-pressed'), 'true');
+    assert.equal(attributes.get('aria-label'), 'Use automatic system theme');
+    assert.equal(systemButton.title, 'Use automatic system theme');
+
+    setControlState(null, systemButton, 'light', 'light');
+    assert.equal(attributes.get('aria-pressed'), 'false');
 });

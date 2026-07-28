@@ -5,12 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="description" content="Analyze supported media URLs and preview planned download formats with Save It. No account required.">
     <meta name="theme-color" content="#0b1220">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Save It">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta property="og:title" content="Save It — Download media. Keep it simple.">
     <meta property="og:description" content="Paste a supported media URL, analyze the available format plan, and keep recent fetches in your browser.">
     <meta property="og:url" content="https://save.allmy.win/">
     <meta property="og:type" content="website">
     <link rel="canonical" href="https://save.allmy.win/">
     <link rel="icon" href="/favicon.ico" sizes="any">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="icon" href="/favicon-32x32.png" type="image/png" sizes="32x32">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180">
+    <link rel="manifest" href="/site.webmanifest">
     <title>Save It — Simple media downloads</title>
     <script>
         (() => {
@@ -38,7 +45,9 @@
     <header class="site-header" data-site-header>
         <div class="shell header-inner">
             <a class="brand" href="#top" aria-label="Save It home">
-                <span class="brand-mark" aria-hidden="true"><span></span></span>
+                <span class="brand-mark" aria-hidden="true">
+                    <img src="/brand/save-it-mark.svg" alt="" width="32" height="32">
+                </span>
                 <span>Save It</span>
             </a>
 
@@ -66,9 +75,10 @@
                         class="theme-system"
                         type="button"
                         aria-pressed="true"
-                        aria-label="Use system theme"
+                        aria-label="Use automatic system theme"
+                        title="Use automatic system theme"
                         data-theme-system
-                    >System</button>
+                    ><span aria-hidden="true">A</span><span class="sr-only">Automatic</span></button>
                 </div>
 
                 <button
@@ -269,10 +279,12 @@
     <footer class="site-footer">
         <div class="shell footer-inner">
             <a class="brand footer-brand" href="#top">
-                <span class="brand-mark" aria-hidden="true"><span></span></span>
+                <span class="brand-mark" aria-hidden="true">
+                    <img src="/brand/save-it-mark.svg" alt="" width="28" height="28">
+                </span>
                 <span>Save It</span>
             </a>
-            <p>Simple media analysis, with less noise.</p>
+            <p class="footer-tagline">Simple media analysis, with less noise.</p>
             <nav aria-label="Footer navigation">
                 <a href="#platforms">Platforms</a>
                 <a href="#how-it-works">How it works</a>
