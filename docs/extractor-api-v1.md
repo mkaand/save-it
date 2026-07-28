@@ -4,8 +4,8 @@
 
 The Save It extractor is an internal Docker-network service. Version 1 establishes
 request validation, provider recognition, adapter boundaries, and stable response
-shapes. PR #4 does not perform remote metadata extraction, DNS resolution, redirects,
-downloads, conversion, or shell execution.
+shapes. PR #5 adds bounded public X metadata extraction. It does not download media,
+perform conversion, or execute shell commands.
 
 The Laravel application is the only intended client. The extractor has no published
 host port.
@@ -59,10 +59,68 @@ Rules:
 The service does not trust a client-provided provider name. Provider and subtype are
 derived from the normalized hostname and path.
 
+For X, only status paths are valid. `x.com`, `www.x.com`, `twitter.com`,
+`www.twitter.com`, and `mobile.twitter.com` normalize to
+`https://x.com/<username>/status/<numeric-id>`. Share queries, fragments, and
+`/photo/N` or `/video/N` display suffixes are removed.
+
+## X success response
+
+A public X status containing directly attached media returns HTTP `200` with a `data`
+envelope. `media_type` is `image`, `video`, `animated_gif`, `carousel`, or
+`mixed_media`; `status` is `ready`.
+
+```json
+{
+  "data": {
+    "request_id": "request-id",
+    "provider": "x",
+    "provider_label": "X",
+    "provider_variant": null,
+    "media_type": "video",
+    "source_url": "https://twitter.com/example/status/123?ref=share",
+    "normalized_url": "https://x.com/example/status/123",
+    "status": "ready",
+    "metadata": {
+      "post_id": "123",
+      "text": "Public post text",
+      "author_name": "Example",
+      "author_handle": "example",
+      "published_at": "2026-07-28T12:00:00Z",
+      "thumbnail_url": "https://pbs.twimg.com/media/example.jpg",
+      "media_count": 1
+    },
+    "assets": [],
+    "capabilities": ["metadata", "media_assets", "video_variants"]
+  }
+}
+```
+
+Metadata fields are nullable when X does not supply them. Values are truncated to
+documented limits and HTML entities are decoded; raw HTML is not returned. Save It
+does not invent titles, authors, dates, duration, bitrate, dimensions, codec, or size.
+
+### Assets and variants
+
+Assets retain upstream order and use types `image`, `video`, or `animated_gif`.
+Multiple same-type assets produce `carousel`; mixed types produce `mixed_media`.
+Each asset contains an ID, one-based order, role, allowlisted HTTPS URL, nullable
+thumbnail/MIME/dimensions/duration/alt text, and a variants array.
+
+Video variants contain real upstream MP4 or HLS URLs, MIME type, protocol, nullable
+bitrate and dimensions, a dimension-based quality label, and one deterministic
+preferred variant. Animated GIF posts retain `animated_gif` semantics even when X
+uses MP4 transport. No GIF file is invented.
+
+Quoted-post media is not merged into the submitted post. A valid post without
+directly attached media returns `422 no_media`. Asset references can expire and are
+not download links; delivery remains PR #9 scope.
+
 ## Provider recognition response
 
-Every PR #4 adapter is a controlled stub. A recognized URL therefore returns HTTP
-`501` with `provider_not_implemented`:
+Instagram, YouTube, TikTok, Facebook, and LinkedIn remain controlled stubs. A
+recognized URL for one of them returns HTTP `501` with
+`provider_not_implemented`:
 
 ```json
 {
@@ -89,33 +147,6 @@ Every PR #4 adapter is a controlled stub. A recognized URL therefore returns HTT
 Laravel validates this shape and maps it to the existing public preview response. It
 does not expose the internal service address or Python error internals.
 
-## Future success response
-
-When a later provider PR implements extraction, HTTP `200` will use a versioned
-`data` envelope. Fields may be added compatibly, but existing field meaning will not
-change within v1:
-
-```json
-{
-  "data": {
-    "request_id": "request-id",
-    "provider": "x",
-    "provider_label": "X",
-    "provider_variant": null,
-    "media_type": "video",
-    "source_url": "https://x.com/example/status/123",
-    "normalized_url": "https://x.com/example/status/123",
-    "status": "extracted",
-    "metadata": {},
-    "assets": [],
-    "capabilities": []
-  }
-}
-```
-
-PR #4 never returns this success shape and never invents title, author, duration,
-file size, thumbnail, resolution, codec, publication date, or media URLs.
-
 ## Error response
 
 All errors use one machine-readable envelope:
@@ -141,10 +172,18 @@ All errors use one machine-readable envelope:
 | 422 | `unsupported_host` | Host is local, an IP literal, unsafe, or not recognized |
 | 422 | `embedded_credentials` | URL contains user information |
 | 422 | `disallowed_port` | URL contains an explicit port |
+| 422 | `invalid_x_post_url` | X URL is not a canonicalizable status URL |
+| 422 | `no_media` | Public X post has no directly attached media |
+| 422 | `post_unavailable` | Post is unavailable, private, removed, or not public |
 | 501 | `provider_not_implemented` | Provider is recognized but its adapter is a stub |
+| 502 | `provider_response_changed` | X metadata shape or content type is invalid |
+| 502 | `provider_response_too_large` | X metadata exceeds the 3 MiB limit |
+| 502 | `disallowed_redirect` | Redirect or DNS result violates the X egress policy |
 | 500 | `internal_error` | Unexpected internal service failure |
-| 429 | `rate_limited` | Reserved for a future internal defense-in-depth limiter |
-| 503 | `upstream_unavailable` | Reserved for future provider dependencies |
+| 503 | `provider_timeout` | X exceeded the provider timeout |
+| 503 | `rate_limited_upstream` | X is rate limiting metadata requests |
+| 503 | `provider_blocked` | X denied the public metadata request |
+| 503 | `upstream_unavailable` | Provider dependency is temporarily unavailable |
 
 Stack traces, environment values, internal paths, headers, cookies, and secrets are
 never included in error bodies.
@@ -184,15 +223,24 @@ request ID, provider, status, and duration. Full submitted URLs, query strings,
 request bodies, cookies, and headers are not logged. Uvicorn access logging is
 disabled in production.
 
-## Security boundary
+## X network, privacy, and cache policy
 
-PR #4 contains no HTTP client, DNS lookup, redirect follower, shell invocation,
-yt-dlp, FFmpeg, or file download path. Adapters receive a validated provider context,
-not permission to fetch arbitrary URLs. A dedicated outbound policy layer must be
-introduced before a future adapter can access remote resources.
+Only the X adapter has outbound access. It constructs a metadata request from the
+validated numeric status ID and permits `cdn.syndication.twimg.com` as the metadata
+host. Returned assets must use `pbs.twimg.com` or `video.twimg.com`. TLS verification
+is mandatory, proxy environment variables are ignored, every redirect target is
+revalidated, DNS answers must be globally routable, redirects are capped at three,
+the connect timeout is three seconds, the provider deadline is twelve seconds, and
+decompressed metadata is capped at 3 MiB. Media asset bodies are never requested.
 
-Comprehensive DNS-rebinding, redirect-chain, and egress enforcement remain planned
-for PR #10 and are not claimed as complete here.
+There is no extraction cache in PR #5. This avoids retaining expiring media URLs and
+keeps invalidation explicit. Full URLs, queries, bodies, headers, cookies, and
+upstream payloads are not logged.
+
+The metadata host is fixed rather than user-controlled. DNS preflight narrows the
+baseline risk; connection pinning, centralized egress enforcement, DNS-rebinding
+defense, and cross-provider redirect policy remain PR #10 scope and are not claimed
+complete.
 
 ## Versioning policy
 

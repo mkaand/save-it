@@ -5,12 +5,14 @@ description = "Internal extraction contract service for Save It"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "fastapi==0.140.7",
+    "httpx==0.28.1",
     "pydantic==2.13.4",
     "uvicorn==0.51.0",
 ]
 
 [tool.pytest.ini_options]
 addopts = "-q"
+markers = ["live: optional network-backed provider checks"]
 pythonpath = ["src"]
 testpaths = ["tests"]
 

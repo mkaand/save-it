@@ -84,4 +84,18 @@ class FoundationTest extends TestCase
             $this->assertGreaterThan(0, filesize(base_path($asset)));
         }
     }
+
+    public function test_open_source_github_notice_is_safe_and_local(): void
+    {
+        $this->get('/')
+            ->assertOk()
+            ->assertSee('Open source on GitHub')
+            ->assertSee('https://github.com/mkaand/save-it', false)
+            ->assertSee('target="_blank"', false)
+            ->assertSee('rel="noopener noreferrer"', false)
+            ->assertSee('/brand/github-mark.svg', false)
+            ->assertSee('data-x-extractor-available', false)
+            ->assertDontSee('GitHub stars')
+            ->assertDontSee('GitHub forks');
+    }
 }

@@ -100,3 +100,16 @@ test('stores only the documented minimal fields', () => {
         'analyzedAt',
     ]);
 });
+
+test('does not persist X asset arrays or expiring media URLs', () => {
+    const storage = new MemoryStorage();
+    addRecentFetch(storage, {
+        ...item(1, 'https://x.com/example/status/123'),
+        platform: 'x',
+        assets: [{ url: 'https://video.twimg.com/expiring/video.mp4?token=temporary' }],
+    });
+
+    const stored = JSON.parse(storage.getItem(RECENT_FETCHES_KEY));
+    assert.equal(stored.items[0].assets, undefined);
+    assert.equal(JSON.stringify(stored).includes('video.twimg.com'), false);
+});

@@ -1,4 +1,5 @@
 import ipaddress
+import re
 from dataclasses import dataclass
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
@@ -16,6 +17,7 @@ HOST_PROVIDERS: dict[str, Provider] = {
     "www.x.com": Provider.X,
     "twitter.com": Provider.X,
     "www.twitter.com": Provider.X,
+    "mobile.twitter.com": Provider.X,
     "instagram.com": Provider.INSTAGRAM,
     "www.instagram.com": Provider.INSTAGRAM,
     "youtube.com": Provider.YOUTUBE,
@@ -68,14 +70,10 @@ def classify_url(raw_url: str, max_length: int = 2048) -> ProviderContext:
     if provider is None:
         raise UrlValidationError("unsupported_host", "The submitted host is not supported.")
 
-    normalized = urlunsplit(
-        (
-            parsed.scheme.lower(),
-            hostname,
-            parsed.path or "/",
-            parsed.query,
-            "",
-        )
+    normalized = (
+        _normalize_x_url(hostname, parsed)
+        if provider is Provider.X
+        else urlunsplit((parsed.scheme.lower(), hostname, parsed.path or "/", parsed.query, ""))
     )
     variant = (
         "shorts" if provider is Provider.YOUTUBE and parsed.path.startswith("/shorts/") else None
@@ -86,7 +84,25 @@ def classify_url(raw_url: str, max_length: int = 2048) -> ProviderContext:
         provider_label=PROVIDER_LABELS[provider],
         normalized_url=normalized,
         variant=variant,
+        source_url=raw_url.strip(),
     )
+
+
+X_STATUS_PATH = re.compile(
+    r"^/([A-Za-z0-9_]{1,15})/status/([0-9]{1,20})(?:/(?:photo|video)/[1-9][0-9]*)?/?$"
+)
+
+
+def _normalize_x_url(hostname: str, parsed: SplitResult) -> str:
+    match = X_STATUS_PATH.fullmatch(parsed.path)
+    if match is None:
+        raise UrlValidationError(
+            "invalid_x_post_url",
+            "The submitted URL is not a valid X post URL.",
+        )
+
+    username, status_id = match.groups()
+    return f"https://x.com/{username}/status/{status_id}"
 
 
 def _normalize_hostname(parsed: SplitResult) -> str:

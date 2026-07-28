@@ -42,12 +42,20 @@ def test_every_stub_returns_controlled_empty_result() -> None:
     registry = ProviderRegistry()
 
     for provider in Provider:
+        if provider is Provider.X:
+            continue
         context = classify_url(_example_url(provider))
         result = asyncio.run(registry.get(provider).extract(context, "registry-test"))
         assert result.status == "not_implemented"
         assert result.metadata is None
         assert result.assets == []
         assert result.capabilities == []
+
+
+def test_x_uses_real_adapter() -> None:
+    registry = ProviderRegistry()
+
+    assert type(registry.get(Provider.X)).__name__ == "XProviderAdapter"
 
 
 def _example_url(provider: Provider) -> str:

@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\MediaPlatform;
 use App\Services\Extractor\ExtractorClient;
+use App\Services\Extractor\ExtractorRecognition;
 
 final class MediaUrlAnalyzer
 {
@@ -18,6 +19,7 @@ final class MediaUrlAnalyzer
      *     title: string,
      *     thumbnail_url: ?string,
      *     status: string,
+     *     assets: array<int, array<string, mixed>>,
      *     outputs: array<int, array{id: string, label: string, detail: string, available: bool}>
      * }
      */
@@ -25,6 +27,11 @@ final class MediaUrlAnalyzer
     {
         $recognition = $this->extractor->recognize(trim($input));
         $platform = $recognition->platform;
+
+        if ($recognition->status === 'ready' && $platform === MediaPlatform::X) {
+            return $this->xResult($recognition);
+        }
+
         $parts = parse_url($recognition->normalizedUrl);
         $host = strtolower((string) ($parts['host'] ?? ''));
         $path = (string) ($parts['path'] ?? '/');
@@ -45,8 +52,69 @@ final class MediaUrlAnalyzer
             'title' => $this->title($platform),
             'thumbnail_url' => $videoId === null ? null : "https://i.ytimg.com/vi/{$videoId}/hqdefault.jpg",
             'status' => 'preview',
+            'assets' => [],
             'outputs' => $this->outputs($platform),
         ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function xResult(ExtractorRecognition $recognition): array
+    {
+        $metadata = $recognition->metadata ?? [];
+        $text = $metadata['text'] ?? null;
+        $handle = $metadata['author_handle'] ?? null;
+        $title = is_string($text) && $text !== ''
+            ? $text
+            : (is_string($handle) && $handle !== '' ? "X post by @{$handle}" : 'X post');
+        $thumbnail = $metadata['thumbnail_url'] ?? null;
+
+        if (! is_string($thumbnail)) {
+            $thumbnail = $recognition->assets[0]['thumbnail_url'] ?? null;
+        }
+
+        return [
+            'platform' => MediaPlatform::X->value,
+            'platform_label' => MediaPlatform::X->label(),
+            'media_type' => $recognition->mediaType,
+            'url' => $recognition->normalizedUrl,
+            'title' => $title,
+            'thumbnail_url' => is_string($thumbnail) ? $thumbnail : null,
+            'status' => 'ready',
+            'metadata' => $metadata,
+            'assets' => $recognition->assets,
+            'outputs' => array_map(
+                fn (array $asset): array => [
+                    'id' => $asset['id'],
+                    'label' => match ($asset['type']) {
+                        'image' => 'Image',
+                        'animated_gif' => 'Animated GIF',
+                        default => 'Video',
+                    },
+                    'detail' => $this->assetDetail($asset),
+                    'available' => false,
+                ],
+                $recognition->assets,
+            ),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $asset
+     */
+    private function assetDetail(array $asset): string
+    {
+        $preferred = collect($asset['variants'] ?? [])->firstWhere('is_preferred', true);
+        if (is_array($preferred) && is_string($preferred['quality_label'] ?? null)) {
+            return "{$preferred['quality_label']} · delivery planned";
+        }
+
+        if (is_int($asset['width'] ?? null) && is_int($asset['height'] ?? null)) {
+            return "{$asset['width']}×{$asset['height']} · delivery planned";
+        }
+
+        return 'Metadata ready · delivery planned';
     }
 
     private function youtubeVideoId(string $host, string $path, ?string $query): ?string

@@ -10,6 +10,16 @@ const source = await readFile(path.join(root, 'resources/branding/save-it-mark.s
 const publishedSource = await readFile(path.join(root, 'public/brand/save-it-mark.svg'));
 assert.deepEqual(publishedSource, source, 'Published logo must match the canonical SVG.');
 
+const githubMark = await readFile(path.join(root, 'public/brand/github-mark.svg'), 'utf8');
+assert.match(githubMark, /^<svg[^>]+viewBox="0 0 24 24"/);
+assert.match(githubMark, /<path fill="currentColor" d="[^"]+"\/>/);
+assert.equal(
+    (githubMark.match(/https?:/g) ?? []).length,
+    1,
+    'GitHub mark may only contain the SVG namespace URL.',
+);
+assert.equal(githubMark.includes('<script'), false, 'GitHub mark must not contain scripts.');
+
 const expectedImages = new Map([
     ['public/favicon-16x16.png', 16],
     ['public/favicon-32x32.png', 32],
