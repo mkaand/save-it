@@ -1,9 +1,9 @@
 # Save It Extractor
 
 This internal Python service defines the versioned extraction contract used by the
-Save It Laravel application. PR #5 implements metadata-only extraction for public X
-status URLs while retaining controlled stubs for every other provider. It never
-downloads media binaries.
+Save It Laravel application. It implements metadata-only extraction for public X and
+Instagram posts plus public YouTube videos and Shorts. It never downloads media
+binaries.
 
 The production API is available only on the Docker network:
 
@@ -11,7 +11,9 @@ The production API is available only on the Docker network:
 - `GET /ready`
 - `POST /v1/extract`
 
-The X adapter returns HTTP `200` with normalized metadata and ordered media assets.
+The X and Instagram adapters return normalized metadata and ordered media assets.
+The YouTube adapter returns normalized video metadata, validated thumbnails, safe
+format identifiers, ordered video/audio options, and a disabled MP3 conversion plan.
 Other recognized providers return `501 provider_not_implemented`, which Laravel maps
 to the existing public preview.
 
@@ -20,6 +22,12 @@ verified TLS, ignores environment proxies, validates public DNS results and redi
 caps redirects and decompressed response size, and accepts asset URLs only from
 `pbs.twimg.com` and `video.twimg.com`. It does not retain cookies, invoke subprocesses,
 or fetch the media URLs it returns.
+
+The YouTube adapter uses pinned yt-dlp through its Python library API. It accepts only
+canonical YouTube video and Shorts URLs, disables playlists, cookies, downloads,
+subtitles, remote components, and environment proxies, and never invokes a shell.
+Direct media URLs are intentionally omitted; delivery and stream merging remain PR
+#9 scope.
 
 ## Development
 

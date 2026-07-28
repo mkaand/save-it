@@ -4,9 +4,9 @@
 
 The Save It extractor is an internal Docker-network service. Version 1 establishes
 request validation, provider recognition, adapter boundaries, and stable response
-shapes. PR #5 adds bounded public X metadata extraction, and PR #6 adds bounded
-public Instagram post and reel metadata extraction. It does not download media,
-perform conversion, or execute shell commands.
+shapes. It includes bounded public X and Instagram metadata extraction plus
+metadata-only YouTube video and Shorts analysis. It does not download media, perform
+conversion, or execute shell commands.
 
 The Laravel application is the only intended client. The extractor has no published
 host port.
@@ -69,6 +69,74 @@ For Instagram, only `/p/<shortcode>/` and `/reel/<shortcode>/` paths are valid.
 `instagram.com` and `www.instagram.com` normalize to
 `https://www.instagram.com/<kind>/<shortcode>/`. Share queries and fragments are
 removed. Stories, Live, profiles, Explore, and login-only URLs are rejected.
+
+For YouTube, the accepted forms are `/watch?v=<11-character-id>`,
+`youtu.be/<11-character-id>`, and `/shorts/<11-character-id>` on the exact
+allowlisted hosts. Standard, `www`, `m`, and `music` YouTube watch hosts normalize to
+`https://www.youtube.com/watch?v=<id>`. Shorts normalize to
+`https://www.youtube.com/shorts/<id>`. Playlist parameters on a single-video URL are
+discarded; playlist-only, live, and scheduled-live URL forms are rejected.
+
+## YouTube success response
+
+A public, supported YouTube video or Short returns HTTP `200`. The response contains
+metadata and format identifiers only; it contains no direct media URLs and downloads
+nothing.
+
+```json
+{
+  "data": {
+    "request_id": "request-id",
+    "provider": "youtube",
+    "provider_label": "YouTube",
+    "provider_variant": "video",
+    "media_type": "video",
+    "source_url": "https://youtu.be/dQw4w9WgXcQ",
+    "normalized_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    "status": "ready",
+    "metadata": {
+      "video_id": "dQw4w9WgXcQ",
+      "title": "Public YouTube video",
+      "author_name": "Example Channel",
+      "author_handle": "UCexample",
+      "duration_ms": 212000,
+      "thumbnail_url": "https://i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg",
+      "thumbnails": [],
+      "video_formats": [],
+      "audio_formats": [],
+      "conversion_plans": [
+        {
+          "id": "mp3",
+          "label": "MP3",
+          "source": "audio_format",
+          "requires_ffmpeg": true,
+          "available": false
+        }
+      ]
+    },
+    "assets": [],
+    "capabilities": [
+      "metadata",
+      "thumbnails",
+      "video_formats",
+      "audio_formats",
+      "conversion_plans"
+    ]
+  }
+}
+```
+
+Video format entries use a validated `format_id`, container, real reported codec,
+codec family, nullable resolution/FPS/bitrate/estimated size, and booleans indicating
+whether audio is present and a future merge is required. They are ordered as
+MP4/H.264, MP4/H.265, other MP4, then WebM. Audio-only M4A entries precede WebM
+alternatives. MKV is omitted. MP3 is a conversion plan only and requires FFmpeg in
+PR #9; it is never presented as an extracted media URL.
+
+Missing optional author, duration, size, bitrate, dimensions, or thumbnail values
+remain null or empty. Private, authentication-required, age-restricted,
+DRM-protected, live, scheduled-live, unavailable, playlist, and no-format results
+produce controlled errors rather than invented metadata.
 
 ## Instagram success response
 
@@ -163,7 +231,7 @@ not download links; delivery remains PR #9 scope.
 
 ## Provider recognition response
 
-YouTube, TikTok, Facebook, and LinkedIn remain controlled stubs. A
+TikTok, Facebook, and LinkedIn remain controlled stubs. A
 recognized URL for one of them returns HTTP `501` with
 `provider_not_implemented`:
 
@@ -219,6 +287,13 @@ All errors use one machine-readable envelope:
 | 422 | `disallowed_port` | URL contains an explicit port |
 | 422 | `invalid_x_post_url` | X URL is not a canonicalizable status URL |
 | 422 | `invalid_instagram_media_url` | Instagram URL is not a post or reel URL |
+| 422 | `invalid_youtube_video_url` | YouTube URL is not a supported video or Shorts URL |
+| 422 | `playlist_not_supported` | URL identifies a playlist without one valid video |
+| 422 | `live_not_supported` | YouTube live and scheduled-live content is excluded |
+| 422 | `authentication_required` | Video is private or requires authentication |
+| 422 | `age_restricted` | Video requires age verification |
+| 422 | `drm_protected` | Video formats report DRM protection |
+| 422 | `video_unavailable` | Video is removed or unavailable |
 | 422 | `no_media` | Public post has no extractable directly attached media |
 | 422 | `post_unavailable` | Post is unavailable, private, removed, or not public |
 | 501 | `provider_not_implemented` | Provider is recognized but its adapter is a stub |
@@ -296,6 +371,14 @@ Metadata hosts are fixed rather than user-controlled. DNS preflight narrows the
 baseline risk; connection pinning, centralized egress enforcement, DNS-rebinding
 defense, and cross-provider redirect policy remain PR #10 scope and are not claimed
 complete.
+
+The YouTube adapter receives only a canonical URL built from a validated
+11-character video ID. It uses pinned yt-dlp through its Python library API with
+playlist processing, cookies, downloads, subtitle writes, remote components, and
+environment proxy inheritance disabled. Socket and whole-request deadlines are
+explicit. No shell command or arbitrary CLI argument is built, and format direct
+URLs are omitted from the contract. Comprehensive shared egress policy remains PR
+#10 scope.
 
 ## Versioning policy
 

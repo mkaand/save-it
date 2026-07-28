@@ -90,45 +90,71 @@ final class ExtractorClient
     private function recognitionFromData(mixed $data, string $requestId): ExtractorRecognition
     {
         $provider = is_array($data) ? ($data['provider'] ?? null) : null;
-        $platform = is_string($provider) ? MediaPlatform::tryFrom($provider) : null;
         $variant = is_array($data) ? ($data['provider_variant'] ?? null) : null;
+        $platform = is_string($provider)
+            ? $this->readyPlatform($provider, is_string($variant) ? $variant : null)
+            : null;
+        $isYouTube = in_array(
+            $platform,
+            [MediaPlatform::YouTube, MediaPlatform::YouTubeShorts],
+            true,
+        );
+        $expectedLabel = $isYouTube ? 'YouTube' : $platform?->label();
 
         if (
             ! is_array($data)
             || ! is_string($data['request_id'] ?? null)
             || ! hash_equals($requestId, $data['request_id'])
-            || ! in_array($platform, [MediaPlatform::X, MediaPlatform::Instagram], true)
-            || ($data['provider_label'] ?? null) !== $platform->label()
+            || ! in_array($platform, [
+                MediaPlatform::X,
+                MediaPlatform::Instagram,
+                MediaPlatform::YouTube,
+                MediaPlatform::YouTubeShorts,
+            ], true)
+            || ($data['provider_label'] ?? null) !== $expectedLabel
             || ! $this->validReadyVariant($platform, $variant)
             || ($data['status'] ?? null) !== 'ready'
             || ! is_string($data['media_type'] ?? null)
-            || ! in_array($data['media_type'], ['video', 'image', 'carousel', 'mixed_media', 'animated_gif', 'reel'], true)
+            || ! in_array($data['media_type'], [
+                'video',
+                'short_video',
+                'image',
+                'carousel',
+                'mixed_media',
+                'animated_gif',
+                'reel',
+            ], true)
             || ! is_string($data['normalized_url'] ?? null)
             || ! $this->isSafeReadyUrl($platform, $data['normalized_url'], $variant)
             || ! is_array($data['metadata'] ?? null)
             || ! is_array($data['assets'] ?? null)
-            || $data['assets'] === []
+            || ($isYouTube ? $data['assets'] !== [] : $data['assets'] === [])
             || count($data['assets']) > 20
             || ! is_array($data['capabilities'] ?? null)
         ) {
             throw $this->invalidContract($requestId);
         }
 
-        $metadata = $this->metadata($data['metadata'], $platform, $requestId);
+        $metadata = $isYouTube
+            ? $this->youtubeMetadata($data['metadata'], $requestId)
+            : $this->metadata($data['metadata'], $platform, $requestId);
         $assets = [];
 
         foreach ($data['assets'] as $index => $asset) {
             $assets[] = $this->asset($asset, $index + 1, $platform, $requestId);
         }
 
-        if ($metadata['media_count'] !== count($assets)) {
+        if (! $isYouTube && $metadata['media_count'] !== count($assets)) {
             throw $this->invalidContract($requestId);
         }
 
+        $allowedCapabilities = $isYouTube
+            ? ['metadata', 'thumbnails', 'video_formats', 'audio_formats', 'conversion_plans']
+            : ['metadata', 'media_assets', 'video_variants', 'multiple_assets'];
         $capabilities = array_values(array_filter(
             $data['capabilities'],
             fn (mixed $capability): bool => is_string($capability)
-                && in_array($capability, ['metadata', 'media_assets', 'video_variants', 'multiple_assets'], true),
+                && in_array($capability, $allowedCapabilities, true),
         ));
 
         return new ExtractorRecognition(
@@ -180,6 +206,181 @@ final class ExtractorClient
                 true,
             ),
             'media_count' => $mediaCount,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $metadata
+     * @return array<string, mixed>
+     */
+    private function youtubeMetadata(array $metadata, string $requestId): array
+    {
+        $videoId = $metadata['video_id'] ?? null;
+        $title = $metadata['title'] ?? null;
+        $videoFormats = $metadata['video_formats'] ?? null;
+        $audioFormats = $metadata['audio_formats'] ?? null;
+        $thumbnails = $metadata['thumbnails'] ?? null;
+        $plans = $metadata['conversion_plans'] ?? null;
+
+        if (
+            ! is_string($videoId)
+            || preg_match('/^[A-Za-z0-9_-]{11}$/', $videoId) !== 1
+            || ! is_string($title)
+            || $title === ''
+            || mb_strlen($title) > 300
+            || ! is_array($videoFormats)
+            || count($videoFormats) > 30
+            || ! is_array($audioFormats)
+            || count($audioFormats) > 20
+            || ($videoFormats === [] && $audioFormats === [])
+            || ! is_array($thumbnails)
+            || count($thumbnails) > 8
+            || ! is_array($plans)
+            || count($plans) !== 1
+        ) {
+            throw $this->invalidContract($requestId);
+        }
+
+        $normalizedThumbnails = array_map(
+            fn (mixed $thumbnail): array => $this->youtubeThumbnail($thumbnail, $requestId),
+            $thumbnails,
+        );
+        $normalizedVideo = array_map(
+            fn (mixed $format): array => $this->youtubeVideoFormat($format, $requestId),
+            $videoFormats,
+        );
+        $normalizedAudio = array_map(
+            fn (mixed $format): array => $this->youtubeAudioFormat($format, $requestId),
+            $audioFormats,
+        );
+        $plan = $plans[0] ?? null;
+
+        if (
+            ! is_array($plan)
+            || ($plan['id'] ?? null) !== 'mp3'
+            || ($plan['label'] ?? null) !== 'MP3'
+            || ($plan['source'] ?? null) !== 'audio_format'
+            || ($plan['requires_ffmpeg'] ?? null) !== true
+            || ($plan['available'] ?? null) !== false
+        ) {
+            throw $this->invalidContract($requestId);
+        }
+
+        return [
+            'video_id' => $videoId,
+            'title' => $title,
+            'author_name' => $this->nullableString($metadata['author_name'] ?? null, 120),
+            'author_handle' => $this->nullableString($metadata['author_handle'] ?? null, 120),
+            'duration_ms' => $this->nullablePositiveInt($metadata['duration_ms'] ?? null),
+            'thumbnail_url' => $this->safeAssetUrl(
+                $metadata['thumbnail_url'] ?? null,
+                MediaPlatform::YouTube,
+                $requestId,
+                true,
+            ),
+            'thumbnails' => $normalizedThumbnails,
+            'video_formats' => $normalizedVideo,
+            'audio_formats' => $normalizedAudio,
+            'conversion_plans' => [[
+                'id' => 'mp3',
+                'label' => 'MP3',
+                'source' => 'audio_format',
+                'requires_ffmpeg' => true,
+                'available' => false,
+            ]],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function youtubeThumbnail(mixed $thumbnail, string $requestId): array
+    {
+        if (! is_array($thumbnail)) {
+            throw $this->invalidContract($requestId);
+        }
+
+        return [
+            'url' => $this->safeAssetUrl(
+                $thumbnail['url'] ?? null,
+                MediaPlatform::YouTube,
+                $requestId,
+            ),
+            'width' => $this->nullablePositiveInt($thumbnail['width'] ?? null),
+            'height' => $this->nullablePositiveInt($thumbnail['height'] ?? null),
+            'preference' => is_int($thumbnail['preference'] ?? null)
+                ? $thumbnail['preference']
+                : null,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function youtubeVideoFormat(mixed $format, string $requestId): array
+    {
+        if (
+            ! is_array($format)
+            || ! $this->validFormatId($format['format_id'] ?? null)
+            || ! in_array($format['container'] ?? null, ['mp4', 'webm'], true)
+            || ! is_string($format['video_codec'] ?? null)
+            || ! in_array($format['video_codec_family'] ?? null, ['h264', 'h265', 'other'], true)
+            || ! is_bool($format['has_audio'] ?? null)
+            || ! is_bool($format['requires_merge'] ?? null)
+            || ! is_int($format['preference'] ?? null)
+            || $format['preference'] < 0
+            || $format['preference'] > 3
+        ) {
+            throw $this->invalidContract($requestId);
+        }
+
+        return [
+            'format_id' => $format['format_id'],
+            'container' => $format['container'],
+            'video_codec' => $this->nullableString($format['video_codec'], 80),
+            'video_codec_family' => $format['video_codec_family'],
+            'audio_codec' => $this->nullableString($format['audio_codec'] ?? null, 80),
+            'width' => $this->nullablePositiveInt($format['width'] ?? null),
+            'height' => $this->nullablePositiveInt($format['height'] ?? null),
+            'resolution' => $this->nullableString($format['resolution'] ?? null, 40),
+            'fps' => $this->nullablePositiveNumber($format['fps'] ?? null),
+            'bitrate_kbps' => $this->nullablePositiveNumber($format['bitrate_kbps'] ?? null),
+            'estimated_filesize' => $this->nullablePositiveInt(
+                $format['estimated_filesize'] ?? null,
+            ),
+            'has_audio' => $format['has_audio'],
+            'requires_merge' => $format['requires_merge'],
+            'preference' => $format['preference'],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function youtubeAudioFormat(mixed $format, string $requestId): array
+    {
+        if (
+            ! is_array($format)
+            || ! $this->validFormatId($format['format_id'] ?? null)
+            || ! in_array($format['container'] ?? null, ['m4a', 'webm'], true)
+            || ! is_string($format['audio_codec'] ?? null)
+            || ! is_int($format['preference'] ?? null)
+            || ! in_array($format['preference'], [0, 1], true)
+        ) {
+            throw $this->invalidContract($requestId);
+        }
+
+        return [
+            'format_id' => $format['format_id'],
+            'container' => $format['container'],
+            'audio_codec' => $this->nullableString($format['audio_codec'], 80),
+            'bitrate_kbps' => $this->nullablePositiveNumber($format['bitrate_kbps'] ?? null),
+            'sample_rate_hz' => $this->nullablePositiveInt($format['sample_rate_hz'] ?? null),
+            'estimated_filesize' => $this->nullablePositiveInt(
+                $format['estimated_filesize'] ?? null,
+            ),
+            'language' => $this->nullableString($format['language'] ?? null, 32),
+            'preference' => $format['preference'],
         ];
     }
 
@@ -295,9 +496,13 @@ final class ExtractorClient
 
     private function validReadyVariant(MediaPlatform $platform, mixed $variant): bool
     {
-        return $platform === MediaPlatform::X
-            ? $variant === null
-            : in_array($variant, ['post', 'reel'], true);
+        return match ($platform) {
+            MediaPlatform::X => $variant === null,
+            MediaPlatform::Instagram => in_array($variant, ['post', 'reel'], true),
+            MediaPlatform::YouTube => $variant === 'video',
+            MediaPlatform::YouTubeShorts => $variant === 'shorts',
+            default => false,
+        };
     }
 
     private function isSafeReadyUrl(
@@ -305,9 +510,35 @@ final class ExtractorClient
         string $url,
         mixed $variant,
     ): bool {
-        return $platform === MediaPlatform::X
-            ? $this->isSafeXPostUrl($url)
-            : $this->isSafeInstagramUrl($url, $variant);
+        return match ($platform) {
+            MediaPlatform::X => $this->isSafeXPostUrl($url),
+            MediaPlatform::Instagram => $this->isSafeInstagramUrl($url, $variant),
+            MediaPlatform::YouTube, MediaPlatform::YouTubeShorts => $this->isSafeYouTubeUrl(
+                $url,
+                $platform,
+            ),
+            default => false,
+        };
+    }
+
+    private function isSafeYouTubeUrl(string $url, MediaPlatform $platform): bool
+    {
+        $parts = parse_url($url);
+        $path = (string) ($parts['path'] ?? '');
+        $query = (string) ($parts['query'] ?? '');
+        $validPath = $platform === MediaPlatform::YouTubeShorts
+            ? preg_match('#^/shorts/[A-Za-z0-9_-]{11}$#', $path) === 1 && $query === ''
+            : $path === '/watch' && preg_match('/^v=[A-Za-z0-9_-]{11}$/', $query) === 1;
+
+        return filter_var($url, FILTER_VALIDATE_URL) !== false
+            && is_array($parts)
+            && ($parts['scheme'] ?? null) === 'https'
+            && ($parts['host'] ?? null) === 'www.youtube.com'
+            && $validPath
+            && ! isset($parts['fragment'])
+            && ! isset($parts['user'])
+            && ! isset($parts['pass'])
+            && ! isset($parts['port']);
     }
 
     private function safeAssetUrl(
@@ -328,7 +559,11 @@ final class ExtractorClient
         $host = strtolower((string) ($parts['host'] ?? ''));
         $allowedHost = $platform === MediaPlatform::X
             ? in_array($host, ['pbs.twimg.com', 'video.twimg.com'], true)
-            : str_ends_with($host, '.cdninstagram.com') && $host !== 'cdninstagram.com';
+            : (
+                $platform === MediaPlatform::Instagram
+                    ? str_ends_with($host, '.cdninstagram.com') && $host !== 'cdninstagram.com'
+                    : in_array($host, ['i.ytimg.com', 'img.youtube.com'], true)
+            );
         if (
             filter_var($url, FILTER_VALIDATE_URL) === false
             || ! is_array($parts)
@@ -356,6 +591,17 @@ final class ExtractorClient
     private function nullablePositiveInt(mixed $value): ?int
     {
         return is_int($value) && $value > 0 ? $value : null;
+    }
+
+    private function nullablePositiveNumber(mixed $value): float|int|null
+    {
+        return (is_int($value) || is_float($value)) && $value > 0 ? $value : null;
+    }
+
+    private function validFormatId(mixed $value): bool
+    {
+        return is_string($value)
+            && preg_match('/^[A-Za-z0-9._+-]{1,100}$/', $value) === 1;
     }
 
     private function recognitionFromDetails(
@@ -408,6 +654,19 @@ final class ExtractorClient
         return MediaPlatform::tryFrom($provider);
     }
 
+    private function readyPlatform(string $provider, ?string $variant): ?MediaPlatform
+    {
+        if ($provider === MediaPlatform::YouTube->value) {
+            return $variant === 'shorts'
+                ? MediaPlatform::YouTubeShorts
+                : ($variant === 'video' ? MediaPlatform::YouTube : null);
+        }
+
+        return $variant === null || $provider === MediaPlatform::Instagram->value
+            ? MediaPlatform::tryFrom($provider)
+            : null;
+    }
+
     private function isSafeNormalizedUrl(string $url): bool
     {
         $parts = parse_url($url);
@@ -431,9 +690,18 @@ final class ExtractorClient
             'url_too_long' => 'The media URL is too long.',
             'invalid_x_post_url' => 'Enter a valid X post URL.',
             'invalid_instagram_media_url' => 'Enter a valid Instagram post or reel URL.',
-            'no_media' => $provider === MediaPlatform::Instagram->value
-                ? 'This public Instagram post does not contain extractable media.'
-                : 'This public X post does not contain directly attached media.',
+            'invalid_youtube_video_url' => 'Enter a valid YouTube video or Shorts URL.',
+            'playlist_not_supported' => 'YouTube playlists are not supported. Submit a single video URL.',
+            'live_not_supported' => 'YouTube live and scheduled live videos are not supported.',
+            'authentication_required' => 'This video is private or requires authentication.',
+            'age_restricted' => 'Age-restricted YouTube videos are not supported.',
+            'drm_protected' => 'DRM-protected YouTube media is not supported.',
+            'video_unavailable' => 'This YouTube video is unavailable.',
+            'no_media' => match ($provider) {
+                MediaPlatform::Instagram->value => 'This public Instagram post does not contain extractable media.',
+                MediaPlatform::YouTube->value => 'This YouTube video does not expose supported media formats.',
+                default => 'This public X post does not contain directly attached media.',
+            },
             'post_unavailable' => 'This post is unavailable, private, or requires authentication.',
             default => 'Enter a valid media URL.',
         };

@@ -19,14 +19,6 @@ client = TestClient(main.app, raise_server_exceptions=False)
 @pytest.mark.parametrize(
     ("url", "provider", "label", "variant"),
     [
-        ("https://www.youtube.com/watch?v=abcdefghijk", "youtube", "YouTube", None),
-        ("https://youtu.be/abcdefghijk", "youtube", "YouTube", None),
-        (
-            "https://www.youtube.com/shorts/abcdefghijk",
-            "youtube",
-            "YouTube",
-            "shorts",
-        ),
         ("https://www.tiktok.com/@example/video/123", "tiktok", "TikTok", None),
         ("https://www.facebook.com/example/videos/123", "facebook", "Facebook", None),
         ("https://www.linkedin.com/posts/example", "linkedin", "LinkedIn", None),
@@ -111,6 +103,47 @@ def test_x_success_uses_versioned_data_contract(monkeypatch: pytest.MonkeyPatch)
         "assets": [{"id": "asset-1", "type": "video", "order": 1}],
         "capabilities": ["metadata", "media_assets"],
     }
+    assert "traceback" not in response.text.lower()
+
+
+def test_youtube_success_uses_versioned_data_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+    result = ExtractResult(
+        request_id="contract-test-youtube",
+        provider=Provider.YOUTUBE,
+        provider_label="YouTube",
+        normalized_url="https://www.youtube.com/watch?v=abcdefghijk",
+        variant="video",
+        status="ready",
+        media_type="video",
+        metadata={
+            "video_id": "abcdefghijk",
+            "title": "Public video",
+            "video_formats": [{"format_id": "137", "container": "mp4"}],
+            "audio_formats": [{"format_id": "140", "container": "m4a"}],
+            "conversion_plans": [{"id": "mp3", "available": False}],
+        },
+        assets=[],
+        capabilities=["metadata", "video_formats", "audio_formats", "conversion_plans"],
+    )
+    monkeypatch.setattr(main.service, "extract", AsyncMock(return_value=result))
+
+    response = client.post(
+        "/v1/extract",
+        json={
+            "url": "https://youtu.be/abcdefghijk?list=ignored",
+            "request_id": "contract-test-youtube",
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["provider"] == "youtube"
+    assert data["provider_variant"] == "video"
+    assert data["metadata"]["video_formats"][0]["format_id"] == "137"
+    assert data["metadata"]["audio_formats"][0]["container"] == "m4a"
+    assert data["metadata"]["conversion_plans"][0]["available"] is False
+    assert data["assets"] == []
+    assert "download_url" not in response.text
     assert "traceback" not in response.text.lower()
 
 
