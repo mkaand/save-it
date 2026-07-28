@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\AnalyzeUrlRequest;
+use App\Services\Extractor\ExtractorException;
 use App\Services\MediaUrlAnalyzer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Validation\ValidationException;
@@ -18,6 +19,14 @@ class AnalyzeController extends Controller
             throw ValidationException::withMessages([
                 'url' => [$exception->getMessage()],
             ]);
+        } catch (ExtractorException $exception) {
+            return response()->json([
+                'error' => [
+                    'code' => $exception->publicCode,
+                    'message' => $exception->getMessage(),
+                    'request_id' => $exception->requestId,
+                ],
+            ], $exception->httpStatus);
         }
 
         return response()->json(['data' => $data]);

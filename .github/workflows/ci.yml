@@ -14,9 +14,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
+  php:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 20
 
     steps:
       - name: Check out repository
@@ -29,17 +29,8 @@ jobs:
           extensions: bcmath, mbstring, pdo_sqlite, pcntl, redis, sqlite3, zip
           coverage: none
 
-      - name: Set up Node.js 22
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-
       - name: Install PHP dependencies
         run: composer install --no-interaction --prefer-dist --no-progress
-
-      - name: Install frontend dependencies
-        run: npm ci
 
       - name: Validate Composer metadata
         run: composer validate --strict
@@ -53,6 +44,26 @@ jobs:
       - name: Check PHP formatting
         run: vendor/bin/pint --test
 
+      - name: Inspect application routes
+        run: php artisan route:list
+
+  frontend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
       - name: Run JavaScript tests
         run: npm run test:js
 
@@ -62,14 +73,77 @@ jobs:
       - name: Build frontend assets
         run: npm run build
 
+      - name: Validate generated icons
+        run: npm run test:icons
+
+  python:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: extractor/requirements-dev.lock
+
+      - name: Install pinned Python dependencies
+        working-directory: extractor
+        run: python -m pip install --requirement requirements-dev.lock
+
+      - name: Run extractor tests
+        working-directory: extractor
+        run: PYTHONPATH=src pytest
+
+      - name: Check Python lint
+        working-directory: extractor
+        run: ruff check src tests
+
+      - name: Check Python formatting
+        working-directory: extractor
+        run: ruff format --check src tests
+
+      - name: Audit Python runtime dependencies
+        working-directory: extractor
+        run: pip-audit --requirement requirements.lock --no-deps --disable-pip
+
+      - name: Import extractor application
+        working-directory: extractor
+        run: PYTHONPATH=src python -c "from save_it_extractor.main import app; assert app.title == 'Save It Extractor'"
+
+  docker:
+    needs: [php, frontend, python]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
       - name: Validate Docker Compose
         run: docker compose config
 
-      - name: Build immutable app and Nginx images
-        run: docker compose build app nginx
+      - name: Build immutable extractor, app, and Nginx images
+        run: docker compose build extractor app nginx
+
+      - name: Smoke test extractor image
+        run: docker run --rm --entrypoint python media-downloader-extractor:local -c "from save_it_extractor.main import app; assert app.title == 'Save It Extractor'"
+
+      - name: Validate Nginx configuration
+        run: docker run --rm media-downloader-nginx:local nginx -t
 
       - name: Verify image manifests match
         run: |
           app_sha="$(docker run --rm --entrypoint sha256sum media-downloader-app:local /var/www/html/public/build/manifest.json | cut -d' ' -f1)"
           nginx_sha="$(docker run --rm --entrypoint sha256sum media-downloader-nginx:local /var/www/html/public/build/manifest.json | cut -d' ' -f1)"
+          test "$app_sha" = "$nginx_sha"
+
+      - name: Verify image icons match
+        run: |
+          app_sha="$(docker run --rm --entrypoint sha256sum media-downloader-app:local /var/www/html/public/icons/icon-512.png | cut -d' ' -f1)"
+          nginx_sha="$(docker run --rm --entrypoint sha256sum media-downloader-nginx:local /var/www/html/public/icons/icon-512.png | cut -d' ' -f1)"
           test "$app_sha" = "$nginx_sha"

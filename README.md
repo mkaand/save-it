@@ -2,7 +2,9 @@
 
 Save It is a privacy-conscious media URL analysis experience built with Laravel 12 and PHP 8.2. The public application runs at `https://save.allmy.win`.
 
-PR #3 refines the responsive landing experience, adds system-aware light and dark themes, introduces local platform brand glyphs, and hardens the production delivery pipeline. Actual media extraction and downloading are not implemented yet.
+PR #4 introduces an internal Python extractor contract, secure provider registry, and
+stub adapters. It also completes the approved Save It icon set and mobile footer
+polish. Actual media extraction and downloading are not implemented yet.
 
 ## Current capabilities
 
@@ -16,6 +18,9 @@ PR #3 refines the responsive landing experience, adds system-aware light and dar
 - Five browser-local Recent Fetches stored in `localStorage`
 - Stateless JSON health endpoint
 - Docker services for PHP-FPM, Nginx, Redis, the queue worker, and scheduler
+- Internal Python 3.12 extractor service with FastAPI, Pydantic, and versioned API v1
+- Exact-host provider registry with controlled, non-fetching stub adapters
+- Canonical Save It SVG, favicons, Apple Touch Icon, and web app manifest
 - Immutable app and Nginx images that share one Vite build artifact
 - Production PHP error policy and GitHub Actions CI
 
@@ -36,7 +41,7 @@ curl -X POST http://127.0.0.1:8099/api/analyze \
   --data '{"url":"https://www.youtube.com/watch?v=dQw4w9WgXcQ"}'
 ```
 
-The endpoint:
+The endpoint delegates authoritative provider recognition to the internal extractor:
 
 - accepts only HTTP and HTTPS URLs;
 - uses exact hostname matching to prevent suffix attacks;
@@ -44,6 +49,15 @@ The endpoint:
 - does not resolve DNS, fetch submitted URLs, follow redirects, run shell commands, create jobs, or store history;
 - returns normalized preview metadata with all download options marked unavailable;
 - is limited to 30 requests per minute per client IP.
+
+Laravel calls `POST http://extractor:8000/v1/extract` with explicit connect and total
+timeouts and redirects disabled. Recognized stub providers return a controlled
+internal `501 provider_not_implemented`; Laravel maps that response to the existing
+public preview. Extractor connection failures become a safe public `503`, while an
+invalid extractor contract becomes a safe `502`.
+
+See [Extractor API v1](docs/extractor-api-v1.md) for the complete request, response,
+error, versioning, and privacy contract.
 
 Supported normalized hosts include:
 
@@ -53,6 +67,53 @@ Supported normalized hosts include:
 - `x.com`, `www.x.com`, `twitter.com`, `www.twitter.com`
 - `facebook.com`, `www.facebook.com`, `m.facebook.com`, `fb.watch`
 - `linkedin.com`, `www.linkedin.com`
+
+## Python extractor service
+
+The `extractor` service runs Python 3.12 as UID/GID `10001`, has a read-only root
+filesystem, drops all Linux capabilities, enables `no-new-privileges`, and receives
+only a controlled `/tmp` tmpfs. It has no host port, Docker socket, privileged mode,
+host network, or production source bind mount.
+
+`POST /v1/extract` accepts metadata-only requests up to 8 KiB and URLs up to 2,048
+characters. Pydantic rejects unknown fields. The provider registry classifies X,
+Instagram, YouTube (including the Shorts subtype), TikTok, Facebook, and LinkedIn.
+Every adapter is a `not_implemented` stub in PR #4.
+
+The service uses these non-secret settings:
+
+```dotenv
+EXTRACTOR_BASE_URL=http://extractor:8000
+EXTRACTOR_TIMEOUT_SECONDS=5
+EXTRACTOR_CONNECT_TIMEOUT_SECONDS=2
+EXTRACTOR_APP_NAME=save-it-extractor
+EXTRACTOR_ENV=production
+EXTRACTOR_LOG_LEVEL=INFO
+EXTRACTOR_API_VERSION=1
+EXTRACTOR_REQUEST_TIMEOUT_SECONDS=10
+```
+
+Structured logs include correlation and timing fields but omit full URLs, query
+strings, headers, cookies, and bodies. The service contains no outbound HTTP client,
+DNS resolution, redirect following, shell invocation, yt-dlp, FFmpeg, or download
+path.
+
+Run Python checks in an isolated Python 3.12 environment:
+
+```bash
+cd extractor
+python3.12 -m venv .venv
+. .venv/bin/activate
+python -m pip install --requirement requirements-dev.lock
+PYTHONPATH=src pytest
+ruff check src tests
+ruff format --check src tests
+pip-audit --requirement requirements.lock --no-deps --disable-pip
+```
+
+PR #5 is the next provider implementation and will add X support. Instagram,
+YouTube, and LinkedIn remain planned for PRs #6, #7, and #8 respectively. A dedicated
+outbound policy must be added before any adapter performs remote access.
 
 ## Recent Fetches
 
@@ -73,13 +134,13 @@ URL analysis itself is sent to the application server. The interface does not cl
 
 ## Theme preference
 
-The first visit follows the browser or operating-system color preference. Choosing the iOS-style switch stores an explicit light or dark preference under the versioned key `save-it.theme.v1`. The adjacent System control removes that override and resumes following `prefers-color-scheme`.
+The first visit follows the browser or operating-system color preference. Choosing the iOS-style switch stores an explicit light or dark preference under the versioned key `save-it.theme.v1`. The adjacent `A` Automatic control removes that override and resumes following `prefers-color-scheme`.
 
 Invalid or unavailable browser storage safely falls back to system mode. Theme state is applied before the main stylesheet to minimize a flash of the wrong theme.
 
 ## Current limitations
 
-The following are intentionally not implemented in PR #3:
+The following are intentionally not implemented in PR #4:
 
 - yt-dlp, FFmpeg, or any other extraction engine
 - functional media download links
@@ -88,6 +149,8 @@ The following are intentionally not implemented in PR #3:
 - queue-backed analysis jobs
 - server-side Recent Fetches persistence
 - cross-browser or cross-device history synchronization
+- X, Instagram, YouTube, TikTok, Facebook, or LinkedIn extraction logic
+- provider outbound networking, DNS resolution, or redirect following
 
 Planned YouTube outputs are MP4 with an H.264 compatibility preference, M4A, MP3 conversion, and thumbnail download. They remain disabled previews until the media engine is implemented.
 
@@ -98,7 +161,9 @@ Planned YouTube outputs are MP4 with an H.264 compatibility preference, M4A, MP3
 - Blade, Vite, vanilla JavaScript, and CSS
 - SQLite for initial application data
 - Redis for cache, sessions, and queues
-- Docker Compose services: `app`, `nginx`, `redis`, `worker`, and `scheduler`
+- Docker Compose services: `app`, `nginx`, `redis`, `worker`, `scheduler`, and the
+  internal-only `extractor`
+- Python 3.12, FastAPI 0.140.7, Pydantic 2.13.4, and Uvicorn 0.51.0
 - Simple Icons `16.27.1` as an exact development dependency for selected local brand glyphs
 
 Nginx is published only on `127.0.0.1:8099`. Redis has no host port.
@@ -116,10 +181,17 @@ npm install
 npm run build
 ```
 
-Build the immutable app and Nginx images from the same source and frontend stage:
+Generate the local favicon and web app icon set from the canonical SVG:
 
 ```bash
-docker compose build app nginx
+npm run generate:icons
+npm run test:icons
+```
+
+Build the immutable app, Nginx, and extractor images:
+
+```bash
+docker compose build extractor app nginx
 docker compose up -d
 docker compose exec app php artisan migrate --force
 ```
@@ -134,6 +206,9 @@ APP_DEBUG=false
 
 Keep the generated `APP_KEY` private. Compose uses environment interpolation with production-safe defaults and does not contain an application key.
 
+The `.env.example` extractor URL points only to the internal Compose service. Do not
+publish the extractor port or derive its base URL from submitted media URLs.
+
 ## Production delivery
 
 The app and Nginx services are separate Dockerfile targets built from the same `frontend` stage:
@@ -143,10 +218,11 @@ The app and Nginx services are separate Dockerfile targets built from the same `
 - no host `public` bind mount or manual `docker cp` synchronization is required;
 - Redis data and the host-mounted SQLite and Laravel runtime directories remain outside the images.
 
-Build both targets together and recreate only the services that consume changed images:
+Build all changed targets together and recreate only the services that consume changed images:
 
 ```bash
-docker compose build app nginx
+docker compose build extractor app nginx
+docker compose up -d --no-deps extractor
 docker compose up -d --no-deps app
 docker compose up -d --no-deps worker scheduler
 docker compose up -d --no-deps nginx
@@ -171,9 +247,12 @@ php8.2 artisan route:list
 php8.2 "$(command -v composer)" audit
 npm run test:js
 npm run build
+npm run test:icons
 npm audit --omit=dev
+docker run --rm -v "$PWD/extractor:/work" -w /work python:3.12.12-slim-bookworm \
+  sh -c "python -m venv /tmp/venv && /tmp/venv/bin/pip install -r requirements-dev.lock && PYTHONPATH=src /tmp/venv/bin/pytest"
 docker compose config
-docker compose build app nginx
+docker compose build extractor app nginx
 bash -n scripts/validate-assets.sh
 ```
 
@@ -195,7 +274,10 @@ Cloudflare and Hestia configuration are managed outside this repository.
 
 ## Continuous integration
 
-`.github/workflows/ci.yml` runs on pull requests and pushes to `main`. It validates Composer metadata, audits PHP and frontend dependencies, runs Laravel, Pint, and JavaScript tests, builds Vite assets, validates Docker Compose, builds both immutable image targets, and confirms their manifest hashes match.
+`.github/workflows/ci.yml` runs PHP, frontend, Python, and Docker jobs on pull
+requests and pushes to `main`. It validates Composer metadata, dependency audits,
+Laravel tests, Pint, JavaScript tests, icon generation, pytest, Ruff, the Python
+runtime audit, Docker Compose, all changed images, and matching app/Nginx manifests.
 
 ## Brand icon notice
 

@@ -50,4 +50,38 @@ class FoundationTest extends TestCase
         $this->assertStringNotContainsString('APP_KEY', $response->getContent());
         $this->assertStringNotContainsString('debug', strtolower($response->getContent()));
     }
+
+    public function test_brand_icons_manifest_footer_and_automatic_theme_control_are_present(): void
+    {
+        $response = $this->get('/')->assertOk();
+        $content = $response->getContent();
+
+        $response
+            ->assertSee('/brand/save-it-mark.svg', false)
+            ->assertSee('/favicon.svg', false)
+            ->assertSee('/apple-touch-icon.png', false)
+            ->assertSee('/site.webmanifest', false)
+            ->assertSee('apple-mobile-web-app-title', false)
+            ->assertSee('content="Save It"', false)
+            ->assertSee('aria-label="Use automatic system theme"', false)
+            ->assertSee('class="footer-tagline"', false);
+
+        $footer = substr($content, (int) strpos($content, '<footer'));
+        $this->assertTrue(strpos($footer, 'footer-brand') < strpos($footer, 'footer-tagline'));
+        $this->assertTrue(strpos($footer, 'footer-tagline') < strpos($footer, '<nav'));
+        $this->assertTrue(strpos($footer, '<nav') < strpos($footer, 'copyright'));
+
+        foreach ([
+            'public/favicon.ico',
+            'public/favicon.svg',
+            'public/apple-touch-icon.png',
+            'public/icons/icon-192.png',
+            'public/icons/icon-512.png',
+            'public/icons/icon-maskable-512.png',
+            'public/site.webmanifest',
+        ] as $asset) {
+            $this->assertFileExists(base_path($asset));
+            $this->assertGreaterThan(0, filesize(base_path($asset)));
+        }
+    }
 }
