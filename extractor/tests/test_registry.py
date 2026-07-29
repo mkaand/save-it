@@ -42,7 +42,7 @@ def test_every_stub_returns_controlled_empty_result() -> None:
     registry = ProviderRegistry()
 
     for provider in Provider:
-        if provider in {Provider.X, Provider.INSTAGRAM, Provider.YOUTUBE}:
+        if provider in {Provider.X, Provider.INSTAGRAM, Provider.YOUTUBE, Provider.LINKEDIN}:
             continue
         context = classify_url(_example_url(provider))
         result = asyncio.run(registry.get(provider).extract(context, "registry-test"))
@@ -62,6 +62,12 @@ def test_youtube_uses_real_adapter() -> None:
     registry = ProviderRegistry()
 
     assert type(registry.get(Provider.YOUTUBE)).__name__ == "YouTubeProviderAdapter"
+
+
+def test_linkedin_uses_real_beta_adapter() -> None:
+    registry = ProviderRegistry()
+
+    assert type(registry.get(Provider.LINKEDIN)).__name__ == "LinkedInProviderAdapter"
 
 
 def _example_url(provider: Provider) -> str:

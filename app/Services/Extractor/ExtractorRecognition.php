@@ -15,5 +15,7 @@ final readonly class ExtractorRecognition
         public ?array $metadata = null,
         public array $assets = [],
         public array $capabilities = [],
+        public ?string $maturity = null,
+        public array $warnings = [],
     ) {}
 }

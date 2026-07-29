@@ -208,6 +208,8 @@ async def extract(payload: ExtractRequest, request: Request) -> JSONResponse:
                     "metadata": result.metadata,
                     "assets": result.assets,
                     "capabilities": result.capabilities,
+                    "provider_maturity": result.maturity,
+                    "warnings": result.warnings,
                 }
             },
             headers={"X-Request-ID": request_id},
@@ -230,6 +232,8 @@ async def extract(payload: ExtractRequest, request: Request) -> JSONResponse:
                 "metadata": result.metadata,
                 "assets": result.assets,
                 "capabilities": result.capabilities,
+                "provider_maturity": result.maturity,
+                "warnings": result.warnings,
             },
         )
     )

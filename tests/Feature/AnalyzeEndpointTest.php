@@ -23,7 +23,7 @@ class AnalyzeEndpointTest extends TestCase
             'X' => ['https://x.com/saveit/status/123456', 'x', 'X', 'preview'],
             'Twitter' => ['https://twitter.com/saveit/status/123456', 'x', 'X', 'preview'],
             'Facebook' => ['https://www.facebook.com/watch/?v=123456', 'facebook', 'Facebook', 'preview'],
-            'LinkedIn' => ['https://www.linkedin.com/posts/example', 'linkedin', 'LinkedIn', 'preview'],
+            'LinkedIn' => ['https://www.linkedin.com/posts/example-activity-1234567890123456789-abcd', 'linkedin', 'LinkedIn', 'ready'],
         ];
     }
 
@@ -266,6 +266,12 @@ class AnalyzeEndpointTest extends TestCase
                 );
             }
 
+            if ($provider === 'linkedin') {
+                return Http::response(
+                    $this->linkedinSuccessResponse($requestId, $effectiveUrl),
+                );
+            }
+
             return Http::response([
                 'error' => [
                     'code' => 'provider_not_implemented',
@@ -311,6 +317,8 @@ class AnalyzeEndpointTest extends TestCase
                 'source_url' => $normalizedUrl,
                 'normalized_url' => $canonical,
                 'status' => 'ready',
+                'provider_maturity' => null,
+                'warnings' => [],
                 'metadata' => [
                     'video_id' => $videoId,
                     'title' => 'Public YouTube video',
@@ -366,6 +374,54 @@ class AnalyzeEndpointTest extends TestCase
                     'audio_formats',
                     'conversion_plans',
                 ],
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function linkedinSuccessResponse(string $requestId, string $sourceUrl): array
+    {
+        return [
+            'data' => [
+                'request_id' => $requestId,
+                'provider' => 'linkedin',
+                'provider_label' => 'LinkedIn',
+                'provider_variant' => 'activity',
+                'media_type' => 'image',
+                'source_url' => $sourceUrl,
+                'normalized_url' => 'https://www.linkedin.com/feed/update/urn:li:activity:1234567890123456789/',
+                'status' => 'ready',
+                'provider_maturity' => 'beta',
+                'warnings' => [
+                    "Public availability depends on LinkedIn's current unauthenticated response.",
+                ],
+                'metadata' => [
+                    'post_id' => '1234567890123456789',
+                    'title' => 'Public LinkedIn post',
+                    'description' => 'A public post preview.',
+                    'author_name' => 'Example Organization',
+                    'author_handle' => null,
+                    'published_at' => null,
+                    'thumbnail_url' => 'https://media.licdn.com/dms/image/example',
+                    'media_count' => 1,
+                ],
+                'assets' => [[
+                    'id' => 'asset-1',
+                    'order' => 1,
+                    'type' => 'image',
+                    'role' => 'primary',
+                    'url' => 'https://media.licdn.com/dms/image/example',
+                    'thumbnail_url' => 'https://media.licdn.com/dms/image/example',
+                    'mime_type' => 'image/jpeg',
+                    'width' => 1200,
+                    'height' => 627,
+                    'duration_ms' => null,
+                    'alt_text' => null,
+                    'variants' => [],
+                ]],
+                'capabilities' => ['metadata', 'media_assets', 'beta'],
             ],
         ];
     }

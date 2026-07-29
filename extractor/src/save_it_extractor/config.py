@@ -22,6 +22,11 @@ class Settings:
     instagram_max_redirects: int = 2
     instagram_max_metadata_bytes: int = 4 * 1024 * 1024
     instagram_max_assets: int = 20
+    linkedin_connect_timeout_seconds: float = 3.0
+    linkedin_read_timeout_seconds: float = 8.0
+    linkedin_max_redirects: int = 2
+    linkedin_max_metadata_bytes: int = 3 * 1024 * 1024
+    linkedin_max_assets: int = 20
     youtube_socket_timeout_seconds: float = 5.0
     youtube_max_source_formats: int = 500
     youtube_max_video_formats: int = 30

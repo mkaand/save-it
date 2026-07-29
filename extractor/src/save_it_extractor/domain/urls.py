@@ -35,6 +35,8 @@ HOST_PROVIDERS: dict[str, Provider] = {
     "fb.watch": Provider.FACEBOOK,
     "linkedin.com": Provider.LINKEDIN,
     "www.linkedin.com": Provider.LINKEDIN,
+    "m.linkedin.com": Provider.LINKEDIN,
+    "lnkd.in": Provider.LINKEDIN,
 }
 
 
@@ -79,8 +81,12 @@ def classify_url(raw_url: str, max_length: int = 2048) -> ProviderContext:
             else (
                 _normalize_youtube_url(hostname, parsed)
                 if provider is Provider.YOUTUBE
-                else urlunsplit(
-                    (parsed.scheme.lower(), hostname, parsed.path or "/", parsed.query, "")
+                else (
+                    _normalize_linkedin_url(hostname, parsed)
+                    if provider is Provider.LINKEDIN
+                    else urlunsplit(
+                        (parsed.scheme.lower(), hostname, parsed.path or "/", parsed.query, "")
+                    )
                 )
             )
         )
@@ -90,6 +96,8 @@ def classify_url(raw_url: str, max_length: int = 2048) -> ProviderContext:
         variant = "shorts" if "/shorts/" in normalized else "video"
     elif provider is Provider.INSTAGRAM:
         variant = "reel" if normalized.startswith("https://www.instagram.com/reel/") else "post"
+    elif provider is Provider.LINKEDIN:
+        variant = "activity" if "/feed/update/urn:li:activity:" in normalized else "post"
 
     return ProviderContext(
         provider=provider,
@@ -107,6 +115,9 @@ INSTAGRAM_MEDIA_PATH = re.compile(r"^/(p|reel)/([A-Za-z0-9_-]{5,64})/?$")
 YOUTUBE_VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
 YOUTUBE_SHORTS_PATH = re.compile(r"^/shorts/([A-Za-z0-9_-]{11})/?$")
 YOUTUBE_SHORT_URL_PATH = re.compile(r"^/([A-Za-z0-9_-]{11})/?$")
+LINKEDIN_POST_PATH = re.compile(r"^/posts/([A-Za-z0-9._~-]{3,300})/?$")
+LINKEDIN_ACTIVITY_PATH = re.compile(r"^/feed/update/urn:li:activity:([0-9]{6,30})/?$")
+LINKEDIN_ACTIVITY_IN_SLUG = re.compile(r"(?:^|[-_])activity[-_:]([0-9]{6,30})(?:[-_]|$)")
 
 
 def _normalize_x_url(hostname: str, parsed: SplitResult) -> str:
@@ -175,6 +186,32 @@ def _normalize_youtube_url(hostname: str, parsed: SplitResult) -> str:
     if variant == "shorts":
         return f"https://www.youtube.com/shorts/{video_id}"
     return f"https://www.youtube.com/watch?v={video_id}"
+
+
+def _normalize_linkedin_url(hostname: str, parsed: SplitResult) -> str:
+    if hostname == "lnkd.in":
+        raise UrlValidationError(
+            "linkedin_short_url_not_supported",
+            "LinkedIn short links are not supported. Use the full public post URL.",
+        )
+
+    activity = LINKEDIN_ACTIVITY_PATH.fullmatch(parsed.path)
+    if activity is not None:
+        return f"https://www.linkedin.com/feed/update/urn:li:activity:{activity.group(1)}/"
+
+    post = LINKEDIN_POST_PATH.fullmatch(parsed.path)
+    if post is not None:
+        slug = post.group(1)
+        embedded_activity = LINKEDIN_ACTIVITY_IN_SLUG.search(slug)
+        if embedded_activity is not None:
+            activity_id = embedded_activity.group(1)
+            return f"https://www.linkedin.com/feed/update/urn:li:activity:{activity_id}/"
+        return f"https://www.linkedin.com/posts/{slug}/"
+
+    raise UrlValidationError(
+        "invalid_linkedin_post_url",
+        "LinkedIn Beta supports public post URLs only.",
+    )
 
 
 def _normalize_hostname(parsed: SplitResult) -> str:

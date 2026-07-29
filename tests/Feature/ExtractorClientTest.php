@@ -266,6 +266,8 @@ class ExtractorClientTest extends TestCase
                     'source_url' => 'https://instagram.com/p/Code123/?utm_source=share',
                     'normalized_url' => 'https://www.instagram.com/p/Code123/',
                     'status' => 'ready',
+                    'provider_maturity' => null,
+                    'warnings' => [],
                     'metadata' => [
                         'post_id' => 'Code123',
                         'caption' => 'Public Instagram caption',
@@ -295,6 +297,118 @@ class ExtractorClientTest extends TestCase
         foreach ($response->json('data.outputs') as $output) {
             $this->assertFalse($output['available']);
         }
+    }
+
+    public function test_linkedin_beta_extraction_maps_to_safe_public_response(): void
+    {
+        Http::fake(function (Request $request) {
+            return Http::response(
+                $this->linkedinSuccessResponse($request->data()['request_id']),
+            );
+        });
+
+        $response = $this->postJson('/api/analyze', [
+            'url' => 'https://linkedin.com/posts/example-activity-1234567890123456789-abcd?trk=share',
+        ])->assertOk()
+            ->assertJsonPath('data.platform', 'linkedin')
+            ->assertJsonPath('data.platform_label', 'LinkedIn')
+            ->assertJsonPath('data.provider_maturity', 'beta')
+            ->assertJsonPath('data.media_type', 'carousel')
+            ->assertJsonPath(
+                'data.url',
+                'https://www.linkedin.com/feed/update/urn:li:activity:1234567890123456789/',
+            )
+            ->assertJsonCount(2, 'data.assets')
+            ->assertJsonCount(2, 'data.outputs');
+
+        $this->assertSame(
+            "Public availability depends on LinkedIn's current unauthenticated response.",
+            $response->json('data.warnings.0'),
+        );
+        $this->assertSame('Example Organization', $response->json('data.metadata.author_name'));
+        $this->assertStringNotContainsString('extractor:8000', $response->getContent());
+
+        foreach ($response->json('data.outputs') as $output) {
+            $this->assertFalse($output['available']);
+            $this->assertArrayNotHasKey('download_url', $output);
+        }
+    }
+
+    public function test_linkedin_text_only_post_is_ready_without_media_assets(): void
+    {
+        Http::fake(function (Request $request) {
+            $payload = $this->linkedinSuccessResponse($request->data()['request_id']);
+            $payload['data']['media_type'] = 'text';
+            $payload['data']['metadata']['media_count'] = 0;
+            $payload['data']['metadata']['thumbnail_url'] = null;
+            $payload['data']['assets'] = [];
+            $payload['data']['capabilities'] = ['metadata', 'beta'];
+
+            return Http::response($payload);
+        });
+
+        $this->postJson('/api/analyze', [
+            'url' => 'https://www.linkedin.com/feed/update/urn:li:activity:1234567890123456789/',
+        ])->assertOk()
+            ->assertJsonPath('data.media_type', 'text')
+            ->assertJsonPath('data.thumbnail_url', null)
+            ->assertJsonCount(0, 'data.assets')
+            ->assertJsonPath('data.outputs.0.available', false);
+    }
+
+    #[DataProvider('linkedinErrorProvider')]
+    public function test_linkedin_errors_are_translated_without_internal_details(
+        string $code,
+        int $status,
+        string $expectedMessage,
+    ): void {
+        Http::fake(function (Request $request) use ($code, $status) {
+            return Http::response([
+                'error' => [
+                    'code' => $code,
+                    'message' => 'Sensitive provider response and internal path /srv/app.',
+                    'request_id' => $request->data()['request_id'],
+                    'details' => ['provider' => 'linkedin'],
+                ],
+            ], $status);
+        });
+
+        $response = $this->postJson('/api/analyze', [
+            'url' => 'https://www.linkedin.com/feed/update/urn:li:activity:1234567890123456789/',
+        ])->assertStatus($status)
+            ->assertJsonPath($status === 422 ? 'errors.url.0' : 'error.message', $expectedMessage);
+
+        $this->assertStringNotContainsString('Sensitive provider', $response->getContent());
+        $this->assertStringNotContainsString('/srv/app', $response->getContent());
+    }
+
+    /**
+     * @return array<string, array{string, int, string}>
+     */
+    public static function linkedinErrorProvider(): array
+    {
+        return [
+            'authentication required' => [
+                'authentication_required',
+                422,
+                'This LinkedIn post requires signing in and cannot be analyzed anonymously.',
+            ],
+            'private content' => [
+                'private_content',
+                422,
+                'This LinkedIn post is private or unavailable.',
+            ],
+            'no media' => [
+                'no_media',
+                422,
+                'No downloadable media metadata was found in this public LinkedIn post.',
+            ],
+            'upstream blocked' => [
+                'upstream_blocked',
+                503,
+                'LinkedIn temporarily blocked anonymous metadata access. Please try again later.',
+            ],
+        ];
     }
 
     public function test_youtube_extraction_maps_formats_and_conversion_plan(): void
@@ -394,6 +508,8 @@ class ExtractorClientTest extends TestCase
                 'source_url' => 'https://twitter.com/example/status/123?ref=share',
                 'normalized_url' => 'https://x.com/example/status/123',
                 'status' => 'ready',
+                'provider_maturity' => null,
+                'warnings' => [],
                 'metadata' => [
                     'post_id' => '123',
                     'text' => 'A real public post title',
@@ -424,6 +540,8 @@ class ExtractorClientTest extends TestCase
                 'source_url' => 'https://m.youtube.com/watch?v=dQw4w9WgXcQ&list=PLignored',
                 'normalized_url' => 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
                 'status' => 'ready',
+                'provider_maturity' => null,
+                'warnings' => [],
                 'metadata' => [
                     'video_id' => 'dQw4w9WgXcQ',
                     'title' => 'Public YouTube video',
@@ -479,6 +597,47 @@ class ExtractorClientTest extends TestCase
                     'audio_formats',
                     'conversion_plans',
                 ],
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function linkedinSuccessResponse(string $requestId): array
+    {
+        $assets = [
+            self::linkedinAsset('image', 1),
+            self::linkedinAsset('video', 2),
+        ];
+
+        return [
+            'data' => [
+                'request_id' => $requestId,
+                'provider' => 'linkedin',
+                'provider_label' => 'LinkedIn',
+                'provider_variant' => 'activity',
+                'media_type' => 'carousel',
+                'source_url' => 'https://linkedin.com/posts/example-activity-1234567890123456789-abcd?trk=share',
+                'normalized_url' => 'https://www.linkedin.com/feed/update/urn:li:activity:1234567890123456789/',
+                'status' => 'ready',
+                'provider_maturity' => 'beta',
+                'warnings' => [
+                    "Public availability depends on LinkedIn's current unauthenticated response.",
+                    'Some posts may require signing in and cannot be analyzed.',
+                ],
+                'metadata' => [
+                    'post_id' => '1234567890123456789',
+                    'title' => 'Public LinkedIn post',
+                    'description' => 'A public post preview.',
+                    'author_name' => 'Example Organization',
+                    'author_handle' => null,
+                    'published_at' => '2026-07-29T12:00:00Z',
+                    'thumbnail_url' => $assets[0]['thumbnail_url'],
+                    'media_count' => count($assets),
+                ],
+                'assets' => $assets,
+                'capabilities' => ['metadata', 'media_assets', 'multiple_assets', 'beta'],
             ],
         ];
     }
@@ -564,6 +723,27 @@ class ExtractorClientTest extends TestCase
                 'quality_label' => '1080×1350',
                 'is_preferred' => true,
             ]] : [],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function linkedinAsset(string $type, int $order): array
+    {
+        return [
+            'id' => "asset-{$order}",
+            'order' => $order,
+            'type' => $type,
+            'role' => $order === 1 ? 'primary' : 'gallery',
+            'url' => "https://media.licdn.com/dms/{$type}/asset-{$order}",
+            'thumbnail_url' => "https://media.licdn.com/dms/image/preview-{$order}",
+            'mime_type' => $type === 'video' ? 'video/mp4' : 'image/jpeg',
+            'width' => 1200,
+            'height' => 627,
+            'duration_ms' => $type === 'video' ? 12000 : null,
+            'alt_text' => null,
+            'variants' => [],
         ];
     }
 }

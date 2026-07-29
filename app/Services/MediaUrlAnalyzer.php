@@ -35,6 +35,7 @@ final class MediaUrlAnalyzer
                 MediaPlatform::Instagram,
                 MediaPlatform::YouTube,
                 MediaPlatform::YouTubeShorts,
+                MediaPlatform::LinkedIn,
             ], true)
         ) {
             return $this->providerResult($recognition);
@@ -78,6 +79,10 @@ final class MediaUrlAnalyzer
             return $this->youtubeResult($recognition);
         }
 
+        if ($recognition->platform === MediaPlatform::LinkedIn) {
+            return $this->linkedinResult($recognition);
+        }
+
         $metadata = $recognition->metadata ?? [];
         $text = $metadata['text'] ?? null;
         $handle = $metadata['author_handle'] ?? null;
@@ -102,6 +107,9 @@ final class MediaUrlAnalyzer
             'status' => 'ready',
             'metadata' => $metadata,
             'assets' => $recognition->assets,
+            'capabilities' => $recognition->capabilities,
+            'provider_maturity' => $recognition->maturity,
+            'warnings' => $recognition->warnings,
             'outputs' => array_map(
                 fn (array $asset): array => [
                     'id' => $asset['id'],
@@ -115,6 +123,63 @@ final class MediaUrlAnalyzer
                 ],
                 $recognition->assets,
             ),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function linkedinResult(ExtractorRecognition $recognition): array
+    {
+        $metadata = $recognition->metadata ?? [];
+        $title = $metadata['title'] ?? null;
+        $description = $metadata['description'] ?? null;
+        $author = $metadata['author_name'] ?? null;
+        if (! is_string($title) || $title === '') {
+            $title = is_string($description) && $description !== ''
+                ? mb_substr($description, 0, 160)
+                : (is_string($author) && $author !== ''
+                    ? "LinkedIn post by {$author}"
+                    : 'LinkedIn public post');
+        }
+
+        $thumbnail = $metadata['thumbnail_url'] ?? null;
+        if (! is_string($thumbnail)) {
+            $thumbnail = $recognition->assets[0]['thumbnail_url'] ?? null;
+        }
+
+        $outputs = array_map(
+            fn (array $asset): array => [
+                'id' => $asset['id'],
+                'label' => $asset['type'] === 'image' ? 'Image' : 'Video',
+                'detail' => $this->assetDetail($asset),
+                'available' => false,
+            ],
+            $recognition->assets,
+        );
+        if ($outputs === []) {
+            $outputs[] = [
+                'id' => 'linkedin-metadata',
+                'label' => 'Metadata only',
+                'detail' => 'No public media asset was exposed',
+                'available' => false,
+            ];
+        }
+
+        return [
+            'platform' => MediaPlatform::LinkedIn->value,
+            'platform_label' => MediaPlatform::LinkedIn->label(),
+            'provider_maturity' => 'beta',
+            'media_type' => $recognition->mediaType,
+            'url' => $recognition->normalizedUrl,
+            'title' => $title,
+            'thumbnail_url' => is_string($thumbnail) ? $thumbnail : null,
+            'status' => 'ready',
+            'metadata' => $metadata,
+            'assets' => $recognition->assets,
+            'capabilities' => $recognition->capabilities,
+            'warnings' => $recognition->warnings,
+            'outputs' => $outputs,
         ];
     }
 
