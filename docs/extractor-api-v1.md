@@ -229,9 +229,67 @@ Quoted-post media is not merged into the submitted post. A valid post without
 directly attached media returns `422 no_media`. Asset references can expire and are
 not download links; delivery remains PR #9 scope.
 
+## LinkedIn Beta ready response
+
+Public LinkedIn `/posts/...` and `/feed/update/urn:li:activity:<id>/` URLs can
+produce a ready Beta response when reliable unauthenticated metadata is available.
+Tracking parameters are removed, and post slugs containing an activity identifier
+normalize to the canonical activity URL.
+
+```json
+{
+  "data": {
+    "request_id": "optional-client-request-id",
+    "provider": "linkedin",
+    "provider_label": "LinkedIn",
+    "provider_variant": "activity",
+    "provider_maturity": "beta",
+    "media_type": "image",
+    "normalized_url": "https://www.linkedin.com/feed/update/urn:li:activity:1234567890123456789/",
+    "status": "ready",
+    "metadata": {
+      "post_id": "1234567890123456789",
+      "title": "Public post title",
+      "description": "Public post excerpt",
+      "author_name": "Example Organization",
+      "author_handle": null,
+      "published_at": null,
+      "thumbnail_url": "https://media.licdn.com/dms/image/example",
+      "media_count": 1
+    },
+    "assets": [
+      {
+        "id": "asset-1",
+        "order": 1,
+        "type": "image",
+        "role": "primary",
+        "url": "https://media.licdn.com/dms/image/example",
+        "thumbnail_url": "https://media.licdn.com/dms/image/example",
+        "mime_type": "image/jpeg",
+        "width": null,
+        "height": null,
+        "duration_ms": null,
+        "alt_text": null,
+        "variants": []
+      }
+    ],
+    "capabilities": ["metadata", "beta"],
+    "warnings": [
+      "Public availability depends on LinkedIn's current unauthenticated response."
+    ]
+  }
+}
+```
+
+`media_type` can be `image`, `video`, `carousel`, or `text`. Missing fields remain
+null rather than being inferred. Asset URLs must use verified HTTPS on a
+`*.licdn.com` host and are metadata references, not download links. Profiles,
+company pages, jobs, articles, general feeds, authentication pages, and short links
+are rejected. Login walls and access restrictions return controlled errors.
+
 ## Provider recognition response
 
-TikTok, Facebook, and LinkedIn remain controlled stubs. A
+TikTok and Facebook remain controlled stubs. A
 recognized URL for one of them returns HTTP `501` with
 `provider_not_implemented`:
 
@@ -288,6 +346,8 @@ All errors use one machine-readable envelope:
 | 422 | `invalid_x_post_url` | X URL is not a canonicalizable status URL |
 | 422 | `invalid_instagram_media_url` | Instagram URL is not a post or reel URL |
 | 422 | `invalid_youtube_video_url` | YouTube URL is not a supported video or Shorts URL |
+| 422 | `invalid_linkedin_post_url` | LinkedIn URL is not a supported public post URL |
+| 422 | `linkedin_short_url_not_supported` | A full public LinkedIn post URL is required |
 | 422 | `playlist_not_supported` | URL identifies a playlist without one valid video |
 | 422 | `live_not_supported` | YouTube live and scheduled-live content is excluded |
 | 422 | `authentication_required` | Video is private or requires authentication |
@@ -296,6 +356,7 @@ All errors use one machine-readable envelope:
 | 422 | `video_unavailable` | Video is removed or unavailable |
 | 422 | `no_media` | Public post has no extractable directly attached media |
 | 422 | `post_unavailable` | Post is unavailable, private, removed, or not public |
+| 422 | `unavailable_content` | LinkedIn content is private, removed, or unavailable |
 | 501 | `provider_not_implemented` | Provider is recognized but its adapter is a stub |
 | 502 | `provider_response_changed` | Provider metadata shape or content type is invalid |
 | 502 | `provider_response_too_large` | Provider metadata exceeds its bounded limit |
@@ -304,6 +365,9 @@ All errors use one machine-readable envelope:
 | 503 | `provider_timeout` | Provider exceeded its timeout |
 | 503 | `rate_limited_upstream` | Provider is rate limiting metadata requests |
 | 503 | `provider_blocked` | Provider denied the public metadata request |
+| 503 | `upstream_blocked` | LinkedIn denied anonymous metadata access |
+| 503 | `rate_limited` | LinkedIn temporarily rate limited anonymous access |
+| 503 | `temporary_provider_error` | LinkedIn metadata is temporarily unavailable |
 | 503 | `upstream_unavailable` | Provider dependency is temporarily unavailable |
 
 Stack traces, environment values, internal paths, headers, cookies, and secrets are
@@ -379,6 +443,15 @@ environment proxy inheritance disabled. Socket and whole-request deadlines are
 explicit. No shell command or arbitrary CLI argument is built, and format direct
 URLs are omitted from the contract. Comprehensive shared egress policy remains PR
 #10 scope.
+
+The LinkedIn Beta adapter requests only canonical HTTPS post/activity URLs on
+`linkedin.com`, `www.linkedin.com`, or `m.linkedin.com`. Redirect hosts are
+revalidated, DNS answers must be globally routable, redirects are capped at two,
+connect/read timeouts are three/eight seconds, and decompressed HTML is capped at
+3 MiB. Proxy environment variables are ignored, TLS verification remains enabled,
+cookies are not persisted, and media bodies are never fetched. Returned media
+references must use a strict `*.licdn.com` hostname. `lnkd.in` redirects are not
+resolved in v1.
 
 ## Versioning policy
 

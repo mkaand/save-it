@@ -76,6 +76,35 @@ final class ExtractorClient
         }
 
         if ($response->serverError()) {
+            $code = data_get($payload, 'error.code');
+            $provider = data_get($payload, 'error.details.provider');
+            if (
+                $provider === MediaPlatform::LinkedIn->value
+                && is_string($code)
+                && in_array($code, [
+                    'upstream_blocked',
+                    'rate_limited',
+                    'parsing_failed',
+                    'temporary_provider_error',
+                    'provider_timeout',
+                    'provider_response_too_large',
+                ], true)
+            ) {
+                throw new ExtractorException(
+                    $code,
+                    $response->status() === 502 ? 502 : 503,
+                    $requestId,
+                    match ($code) {
+                        'upstream_blocked' => 'LinkedIn temporarily blocked anonymous metadata access. Please try again later.',
+                        'rate_limited' => 'LinkedIn is temporarily rate limiting anonymous metadata access.',
+                        'parsing_failed' => 'LinkedIn did not expose reliable public post metadata.',
+                        'provider_timeout' => 'LinkedIn did not respond before the analysis deadline.',
+                        'provider_response_too_large' => 'LinkedIn returned more metadata than the service accepts.',
+                        default => 'LinkedIn metadata is temporarily unavailable.',
+                    },
+                );
+            }
+
             throw new ExtractorException(
                 'upstream_unavailable',
                 503,
@@ -110,6 +139,7 @@ final class ExtractorClient
                 MediaPlatform::Instagram,
                 MediaPlatform::YouTube,
                 MediaPlatform::YouTubeShorts,
+                MediaPlatform::LinkedIn,
             ], true)
             || ($data['provider_label'] ?? null) !== $expectedLabel
             || ! $this->validReadyVariant($platform, $variant)
@@ -123,12 +153,17 @@ final class ExtractorClient
                 'mixed_media',
                 'animated_gif',
                 'reel',
+                'text',
             ], true)
             || ! is_string($data['normalized_url'] ?? null)
             || ! $this->isSafeReadyUrl($platform, $data['normalized_url'], $variant)
             || ! is_array($data['metadata'] ?? null)
             || ! is_array($data['assets'] ?? null)
-            || ($isYouTube ? $data['assets'] !== [] : $data['assets'] === [])
+            || ($isYouTube ? $data['assets'] !== [] : (
+                $platform === MediaPlatform::LinkedIn
+                    ? ($data['media_type'] !== 'text' && $data['assets'] === [])
+                    : $data['assets'] === []
+            ))
             || count($data['assets']) > 20
             || ! is_array($data['capabilities'] ?? null)
         ) {
@@ -137,7 +172,11 @@ final class ExtractorClient
 
         $metadata = $isYouTube
             ? $this->youtubeMetadata($data['metadata'], $requestId)
-            : $this->metadata($data['metadata'], $platform, $requestId);
+            : (
+                $platform === MediaPlatform::LinkedIn
+                    ? $this->linkedinMetadata($data['metadata'], $requestId)
+                    : $this->metadata($data['metadata'], $platform, $requestId)
+            );
         $assets = [];
 
         foreach ($data['assets'] as $index => $asset) {
@@ -150,12 +189,30 @@ final class ExtractorClient
 
         $allowedCapabilities = $isYouTube
             ? ['metadata', 'thumbnails', 'video_formats', 'audio_formats', 'conversion_plans']
-            : ['metadata', 'media_assets', 'video_variants', 'multiple_assets'];
+            : ['metadata', 'media_assets', 'video_variants', 'multiple_assets', 'beta'];
         $capabilities = array_values(array_filter(
             $data['capabilities'],
             fn (mixed $capability): bool => is_string($capability)
                 && in_array($capability, $allowedCapabilities, true),
         ));
+
+        $maturity = $data['provider_maturity'] ?? null;
+        $warnings = $data['warnings'] ?? null;
+        if (
+            ($platform === MediaPlatform::LinkedIn && $maturity !== 'beta')
+            || ($platform !== MediaPlatform::LinkedIn && $maturity !== null)
+            || ! is_array($warnings)
+            || count($warnings) > 5
+        ) {
+            throw $this->invalidContract($requestId);
+        }
+        $normalizedWarnings = [];
+        foreach ($warnings as $warning) {
+            if (! is_string($warning) || $warning === '' || mb_strlen($warning) > 240) {
+                throw $this->invalidContract($requestId);
+            }
+            $normalizedWarnings[] = $warning;
+        }
 
         return new ExtractorRecognition(
             requestId: $requestId,
@@ -166,7 +223,37 @@ final class ExtractorClient
             metadata: $metadata,
             assets: $assets,
             capabilities: array_values(array_unique($capabilities)),
+            maturity: is_string($maturity) ? $maturity : null,
+            warnings: $normalizedWarnings,
         );
+    }
+
+    /**
+     * @param  array<string, mixed>  $metadata
+     * @return array<string, mixed>
+     */
+    private function linkedinMetadata(array $metadata, string $requestId): array
+    {
+        $mediaCount = $metadata['media_count'] ?? null;
+        if (! is_int($mediaCount) || $mediaCount < 0 || $mediaCount > 20) {
+            throw $this->invalidContract($requestId);
+        }
+
+        return [
+            'post_id' => $this->nullableString($metadata['post_id'] ?? null, 300),
+            'title' => $this->nullableString($metadata['title'] ?? null, 300),
+            'description' => $this->nullableString($metadata['description'] ?? null, 500),
+            'author_name' => $this->nullableString($metadata['author_name'] ?? null, 120),
+            'author_handle' => $this->nullableString($metadata['author_handle'] ?? null, 120),
+            'published_at' => $this->nullableString($metadata['published_at'] ?? null, 40),
+            'thumbnail_url' => $this->safeAssetUrl(
+                $metadata['thumbnail_url'] ?? null,
+                MediaPlatform::LinkedIn,
+                $requestId,
+                true,
+            ),
+            'media_count' => $mediaCount,
+        ];
     }
 
     /**
@@ -494,6 +581,27 @@ final class ExtractorClient
             && preg_match("#^/{$kind}/[A-Za-z0-9_-]{5,64}/$#", (string) ($parts['path'] ?? '')) === 1;
     }
 
+    private function isSafeLinkedInUrl(string $url, mixed $variant): bool
+    {
+        $parts = parse_url($url);
+        $path = (string) ($parts['path'] ?? '');
+        $validPath = $variant === 'activity'
+            ? preg_match('#^/feed/update/urn:li:activity:[0-9]{6,30}/$#', $path) === 1
+            : ($variant === 'post'
+                && preg_match('#^/posts/[A-Za-z0-9._~-]{3,300}/$#', $path) === 1);
+
+        return filter_var($url, FILTER_VALIDATE_URL) !== false
+            && is_array($parts)
+            && ($parts['scheme'] ?? null) === 'https'
+            && ($parts['host'] ?? null) === 'www.linkedin.com'
+            && $validPath
+            && ! isset($parts['query'])
+            && ! isset($parts['fragment'])
+            && ! isset($parts['user'])
+            && ! isset($parts['pass'])
+            && ! isset($parts['port']);
+    }
+
     private function validReadyVariant(MediaPlatform $platform, mixed $variant): bool
     {
         return match ($platform) {
@@ -501,6 +609,7 @@ final class ExtractorClient
             MediaPlatform::Instagram => in_array($variant, ['post', 'reel'], true),
             MediaPlatform::YouTube => $variant === 'video',
             MediaPlatform::YouTubeShorts => $variant === 'shorts',
+            MediaPlatform::LinkedIn => in_array($variant, ['post', 'activity'], true),
             default => false,
         };
     }
@@ -513,6 +622,7 @@ final class ExtractorClient
         return match ($platform) {
             MediaPlatform::X => $this->isSafeXPostUrl($url),
             MediaPlatform::Instagram => $this->isSafeInstagramUrl($url, $variant),
+            MediaPlatform::LinkedIn => $this->isSafeLinkedInUrl($url, $variant),
             MediaPlatform::YouTube, MediaPlatform::YouTubeShorts => $this->isSafeYouTubeUrl(
                 $url,
                 $platform,
@@ -562,7 +672,11 @@ final class ExtractorClient
             : (
                 $platform === MediaPlatform::Instagram
                     ? str_ends_with($host, '.cdninstagram.com') && $host !== 'cdninstagram.com'
-                    : in_array($host, ['i.ytimg.com', 'img.youtube.com'], true)
+                    : (
+                        $platform === MediaPlatform::LinkedIn
+                            ? ($host !== 'licdn.com' && str_ends_with($host, '.licdn.com'))
+                            : in_array($host, ['i.ytimg.com', 'img.youtube.com'], true)
+                    )
             );
         if (
             filter_var($url, FILTER_VALIDATE_URL) === false
@@ -662,9 +776,19 @@ final class ExtractorClient
                 : ($variant === 'video' ? MediaPlatform::YouTube : null);
         }
 
-        return $variant === null || $provider === MediaPlatform::Instagram->value
-            ? MediaPlatform::tryFrom($provider)
-            : null;
+        if ($provider === MediaPlatform::Instagram->value) {
+            return in_array($variant, ['post', 'reel'], true)
+                ? MediaPlatform::Instagram
+                : null;
+        }
+
+        if ($provider === MediaPlatform::LinkedIn->value) {
+            return in_array($variant, ['post', 'activity'], true)
+                ? MediaPlatform::LinkedIn
+                : null;
+        }
+
+        return $variant === null ? MediaPlatform::tryFrom($provider) : null;
     }
 
     private function isSafeNormalizedUrl(string $url): bool
@@ -691,18 +815,27 @@ final class ExtractorClient
             'invalid_x_post_url' => 'Enter a valid X post URL.',
             'invalid_instagram_media_url' => 'Enter a valid Instagram post or reel URL.',
             'invalid_youtube_video_url' => 'Enter a valid YouTube video or Shorts URL.',
+            'invalid_linkedin_post_url' => 'LinkedIn Beta supports public post URLs only.',
+            'linkedin_short_url_not_supported' => 'LinkedIn short links are not supported. Use the full public post URL.',
             'playlist_not_supported' => 'YouTube playlists are not supported. Submit a single video URL.',
             'live_not_supported' => 'YouTube live and scheduled live videos are not supported.',
-            'authentication_required' => 'This video is private or requires authentication.',
+            'authentication_required' => $provider === MediaPlatform::LinkedIn->value
+                ? 'This LinkedIn post requires signing in and cannot be analyzed anonymously.'
+                : 'This video is private or requires authentication.',
             'age_restricted' => 'Age-restricted YouTube videos are not supported.',
             'drm_protected' => 'DRM-protected YouTube media is not supported.',
             'video_unavailable' => 'This YouTube video is unavailable.',
             'no_media' => match ($provider) {
                 MediaPlatform::Instagram->value => 'This public Instagram post does not contain extractable media.',
                 MediaPlatform::YouTube->value => 'This YouTube video does not expose supported media formats.',
+                MediaPlatform::LinkedIn->value => 'No downloadable media metadata was found in this public LinkedIn post.',
                 default => 'This public X post does not contain directly attached media.',
             },
             'post_unavailable' => 'This post is unavailable, private, or requires authentication.',
+            'private_content', 'unavailable_content' => 'This LinkedIn post is private or unavailable.',
+            'upstream_blocked' => 'LinkedIn temporarily blocked anonymous metadata access. Please try again later.',
+            'rate_limited' => 'LinkedIn is temporarily rate limiting anonymous metadata access.',
+            'parsing_failed' => 'LinkedIn did not expose reliable public post metadata.',
             default => 'Enter a valid media URL.',
         };
     }

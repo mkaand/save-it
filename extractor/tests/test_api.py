@@ -21,7 +21,6 @@ client = TestClient(main.app, raise_server_exceptions=False)
     [
         ("https://www.tiktok.com/@example/video/123", "tiktok", "TikTok", None),
         ("https://www.facebook.com/example/videos/123", "facebook", "Facebook", None),
-        ("https://www.linkedin.com/posts/example", "linkedin", "LinkedIn", None),
     ],
 )
 def test_recognized_providers_return_controlled_stub_contract(
@@ -102,7 +101,48 @@ def test_x_success_uses_versioned_data_contract(monkeypatch: pytest.MonkeyPatch)
         "metadata": {"post_id": "123", "media_count": 1},
         "assets": [{"id": "asset-1", "type": "video", "order": 1}],
         "capabilities": ["metadata", "media_assets"],
+        "provider_maturity": None,
+        "warnings": [],
     }
+    assert "traceback" not in response.text.lower()
+
+
+def test_linkedin_success_exposes_beta_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+    result = ExtractResult(
+        request_id="contract-test-linkedin",
+        provider=Provider.LINKEDIN,
+        provider_label="LinkedIn",
+        normalized_url="https://www.linkedin.com/posts/example-public-post/",
+        variant="post",
+        status="ready",
+        media_type="image",
+        metadata={
+            "post_id": "example-public-post",
+            "title": "Public LinkedIn post",
+            "media_count": 1,
+        },
+        assets=[{"id": "asset-1", "type": "image", "order": 1}],
+        capabilities=["metadata", "beta", "media_assets"],
+        maturity="beta",
+        warnings=["Public availability depends on LinkedIn's current unauthenticated response."],
+    )
+    monkeypatch.setattr(main.service, "extract", AsyncMock(return_value=result))
+
+    response = client.post(
+        "/v1/extract",
+        json={
+            "url": "https://www.linkedin.com/posts/example-public-post/",
+            "request_id": "contract-test-linkedin",
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["provider"] == "linkedin"
+    assert data["provider_variant"] == "post"
+    assert data["provider_maturity"] == "beta"
+    assert data["warnings"]
+    assert data["status"] == "ready"
     assert "traceback" not in response.text.lower()
 
 

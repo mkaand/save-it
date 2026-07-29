@@ -43,3 +43,5 @@ class ExtractResult:
     metadata: dict[str, Any] | None = None
     assets: list[dict[str, Any]] = field(default_factory=list)
     capabilities: list[str] = field(default_factory=list)
+    maturity: str | None = None
+    warnings: list[str] = field(default_factory=list)

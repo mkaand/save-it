@@ -2,8 +2,8 @@
 
 This internal Python service defines the versioned extraction contract used by the
 Save It Laravel application. It implements metadata-only extraction for public X and
-Instagram posts plus public YouTube videos and Shorts. It never downloads media
-binaries.
+Instagram posts, public YouTube videos and Shorts, and best-effort anonymous
+LinkedIn post analysis. It never downloads media binaries.
 
 The production API is available only on the Docker network:
 
@@ -14,7 +14,7 @@ The production API is available only on the Docker network:
 The X and Instagram adapters return normalized metadata and ordered media assets.
 The YouTube adapter returns normalized video metadata, validated thumbnails, safe
 format identifiers, ordered video/audio options, and a disabled MP3 conversion plan.
-Other recognized providers return `501 provider_not_implemented`, which Laravel maps
+TikTok and Facebook return `501 provider_not_implemented`, which Laravel maps
 to the existing public preview.
 
 The X adapter builds its own request to the public structured metadata host. It uses
@@ -29,6 +29,13 @@ subtitles, remote components, and environment proxies, and never invokes a shell
 Direct media URLs are intentionally omitted; delivery and stream merging remain PR
 #9 scope.
 
+The LinkedIn Beta adapter accepts only canonical public post and activity URLs. It
+uses verified TLS, ignores environment proxies, validates DNS and every redirect,
+caps redirects and decompressed HTML, and accepts returned media references only
+from `*.licdn.com`. It parses public Open Graph, Twitter Card, and JSON-LD metadata
+without credentials, cookie persistence, browser automation, or login-wall bypass.
+Availability varies with LinkedIn's unauthenticated response.
+
 ## Development
 
 Use an isolated Python 3.12 environment:
@@ -39,6 +46,8 @@ python3.12 -m venv .venv
 python -m pip install --requirement requirements-dev.lock
 PYTHONPATH=src pytest
 SAVE_IT_RUN_X_LIVE_TESTS=1 PYTHONPATH=src pytest -m live
+SAVE_IT_RUN_LINKEDIN_LIVE_TESTS=1 PYTHONPATH=src pytest -m live \
+  tests/test_linkedin_provider.py
 ruff check src tests
 ruff format --check src tests
 ```

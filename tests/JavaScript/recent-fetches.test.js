@@ -96,6 +96,7 @@ test('stores only the documented minimal fields', () => {
         'mediaType',
         'url',
         'title',
+        'author',
         'thumbnailUrl',
         'analyzedAt',
     ]);
@@ -126,6 +127,28 @@ test('does not persist expiring Instagram CDN thumbnails', () => {
     const stored = JSON.parse(storage.getItem(RECENT_FETCHES_KEY));
     assert.equal(stored.items[0].thumbnailUrl, null);
     assert.equal(JSON.stringify(stored).includes('cdninstagram.com'), false);
+});
+
+test('stores minimal LinkedIn history without expiring asset URLs', () => {
+    const storage = new MemoryStorage();
+    addRecentFetch(storage, {
+        ...item(1, 'https://www.linkedin.com/feed/update/urn:li:activity:1234567890123456789/'),
+        platform: 'linkedin',
+        platformLabel: 'LinkedIn',
+        mediaType: 'carousel',
+        title: 'Public LinkedIn post',
+        author: 'Example Organization',
+        thumbnailUrl: 'https://media.licdn.com/dms/image/temporary',
+        assets: [{ url: 'https://media.licdn.com/dms/image/expiring' }],
+        headers: { cookie: 'must-not-persist' },
+    });
+
+    const stored = JSON.parse(storage.getItem(RECENT_FETCHES_KEY));
+    assert.equal(stored.items[0].author, 'Example Organization');
+    assert.equal(stored.items[0].thumbnailUrl, null);
+    assert.equal(stored.items[0].assets, undefined);
+    assert.equal(JSON.stringify(stored).includes('licdn.com'), false);
+    assert.equal(JSON.stringify(stored).includes('cookie'), false);
 });
 
 test('stores YouTube history without format or conversion payloads', () => {

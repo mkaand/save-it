@@ -2,10 +2,10 @@
 
 Save It is a privacy-conscious media URL analysis experience built with Laravel 12 and PHP 8.2. The public application runs at `https://save.allmy.win`.
 
-PR #7 adds metadata-only YouTube video and Shorts analysis through the internal
-extractor. It returns validated thumbnails, ordered video and audio format metadata,
-and an explicit MP3 conversion plan. Media file delivery and FFmpeg conversion are
-not implemented yet.
+PR #8 adds best-effort anonymous metadata analysis for public LinkedIn posts through
+the internal extractor. LinkedIn availability depends on the public HTML returned to
+unauthenticated clients. Media file delivery and authenticated access are not
+implemented.
 
 ## Current capabilities
 
@@ -20,7 +20,7 @@ not implemented yet.
 - Stateless JSON health endpoint
 - Docker services for PHP-FPM, Nginx, Redis, the queue worker, and scheduler
 - Internal Python 3.12 extractor service with FastAPI, Pydantic, and versioned API v1
-- Exact-host provider registry with X, Instagram, and YouTube adapters and controlled stubs for other providers
+- Exact-host provider registry with X, Instagram, YouTube, and LinkedIn Beta adapters and controlled stubs for other providers
 - X public post metadata, ordered assets, and source video variants
 - Instagram public post/reel metadata and ordered image/video carousel assets
 - Open Graph, Twitter Card, robots, sitemap, manifest, and local social-preview assets
@@ -35,7 +35,7 @@ Platform labels describe the current implementation:
 - X: public media extraction available; download delivery remains planned
 - Instagram: public post and reel extraction available; download delivery remains planned
 - YouTube and YouTube Shorts: public metadata and format analysis available; download delivery remains planned
-- LinkedIn: Beta URL recognition
+- LinkedIn: public post metadata analysis in Beta; availability may vary and download delivery remains planned
 - TikTok and Facebook: URL recognition; extraction is planned
 
 ## Analyze endpoint
@@ -55,9 +55,9 @@ The endpoint delegates authoritative provider recognition to the internal extrac
 - uses exact hostname matching to prevent suffix attacks;
 - rejects embedded credentials, custom ports, localhost, and IP address URLs;
 - does not fetch arbitrary submitted URLs, run shell commands, create jobs, or store history;
-- permits X and Instagram adapters to fetch canonical, service-constructed metadata URLs;
+- permits X, Instagram, and LinkedIn adapters to fetch canonical, service-constructed metadata URLs;
 - submits only strictly canonical YouTube video URLs to the pinned yt-dlp library API;
-- returns real X, Instagram, and YouTube metadata or normalized previews for stubs, with download controls unavailable;
+- returns real X, Instagram, YouTube, and best-effort LinkedIn metadata or normalized previews for stubs, with download controls unavailable;
 - is limited to 30 requests per minute per client IP.
 
 Laravel calls `POST http://extractor:8000/v1/extract` with explicit connect and total
@@ -77,7 +77,7 @@ Supported normalized hosts include:
 - `tiktok.com`, `www.tiktok.com`, `vm.tiktok.com`, `vt.tiktok.com`
 - `x.com`, `www.x.com`, `twitter.com`, `www.twitter.com`, `mobile.twitter.com`
 - `facebook.com`, `www.facebook.com`, `m.facebook.com`, `fb.watch`
-- `linkedin.com`, `www.linkedin.com`
+- `linkedin.com`, `www.linkedin.com`, `m.linkedin.com`
 
 ## Python extractor service
 
@@ -93,9 +93,12 @@ The X adapter accepts only canonical status paths, fetches bounded structured
 metadata from `cdn.syndication.twimg.com`, and emits allowlisted
 `pbs.twimg.com`/`video.twimg.com` asset references. The Instagram adapter accepts only
 post and reel paths, fetches bounded public embed metadata from `www.instagram.com`,
-and emits allowlisted `*.cdninstagram.com` asset references. Other adapters remain
-`not_implemented` stubs. The YouTube adapter accepts only canonical video and Shorts
-URLs and uses the pinned yt-dlp Python library API in metadata-only mode.
+and emits allowlisted `*.cdninstagram.com` asset references. The LinkedIn Beta
+adapter accepts only public post and activity URLs, reads bounded public structured
+HTML metadata, and emits only allowlisted `*.licdn.com` asset references. TikTok and
+Facebook remain `not_implemented` stubs. The YouTube adapter accepts only canonical
+video and Shorts URLs and uses the pinned yt-dlp Python library API in metadata-only
+mode.
 
 The service uses these non-secret settings:
 
@@ -136,13 +139,33 @@ Optional provider live checks are excluded from CI and must be enabled explicitl
 ```bash
 SAVE_IT_RUN_INSTAGRAM_LIVE_TESTS=1 PYTHONPATH=src pytest -m live \
   tests/test_instagram_provider.py
+SAVE_IT_RUN_LINKEDIN_LIVE_TESTS=1 PYTHONPATH=src pytest -m live \
+  tests/test_linkedin_provider.py
 ```
 
-The checked-in Instagram tests otherwise use deterministic metadata fixtures and
-mock transports. No credentials, cookies, or private content are required.
+The checked-in provider tests otherwise use deterministic, synthetic metadata
+fixtures and mock transports. No credentials, cookies, or private content are
+required. PR #10 still owns centralized egress, DNS-rebinding, and redirect-chain
+hardening beyond provider-specific baselines.
 
-LinkedIn remains planned for PR #8. PR #10 still owns centralized egress,
-DNS-rebinding, and redirect-chain hardening beyond provider-specific baselines.
+## LinkedIn Beta analysis
+
+LinkedIn Beta accepts public `/posts/...` URLs and
+`/feed/update/urn:li:activity:<id>/` URLs on the standard, `www`, and mobile hosts.
+Tracking parameters and fragments are removed. Post slugs containing a stable
+activity identifier normalize to the canonical activity URL. Profiles, company
+pages, jobs, articles, newsletters, general feeds, authentication pages, and
+`lnkd.in` short links are rejected. Short-link redirects are intentionally not
+resolved in this PR.
+
+The adapter requests only the canonical LinkedIn page without credentials or
+persistent cookies. It prefers Open Graph and Twitter Card metadata, then JSON-LD,
+and returns only fields actually exposed publicly. Public images, native-video
+previews, multi-image metadata, and text-only post metadata are supported on a
+best-effort basis. Login walls, private or unavailable posts, anonymous access
+blocks, rate limits, timeouts, and changed response shapes produce controlled errors.
+No login bypass, browser automation, binary media fetch, or download delivery is
+implemented.
 
 ## YouTube analysis
 
@@ -169,6 +192,7 @@ Only these normalized fields are stored:
 - media type
 - normalized URL
 - safe fallback title
+- optional author or organization
 - optional thumbnail URL
 - analysis timestamp
 
@@ -184,7 +208,7 @@ Invalid or unavailable browser storage safely falls back to system mode. Theme s
 
 ## Current limitations
 
-The following are intentionally not implemented in PR #7:
+The following are intentionally not implemented in PR #8:
 
 - FFmpeg, download, or conversion engines
 - functional media download links
@@ -192,7 +216,8 @@ The following are intentionally not implemented in PR #7:
 - queue-backed analysis jobs
 - server-side Recent Fetches persistence
 - cross-browser or cross-device history synchronization
-- TikTok, Facebook, or LinkedIn extraction logic
+- TikTok or Facebook extraction logic
+- authenticated, private, authwall-protected, or short-link LinkedIn analysis
 - Instagram Stories, Live, private, or login-required extraction
 - X private/protected posts or authenticated extraction
 - media file delivery, URL proxying, or expired asset URL renewal
