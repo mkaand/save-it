@@ -31,12 +31,19 @@ export function safeResultImageUrl(value) {
 
     try {
         const parsed = new URL(value);
+        const safeCdnHost = (
+            parsed.hostname.endsWith('.cdninstagram.com')
+            && parsed.hostname !== 'cdninstagram.com'
+        ) || (
+            parsed.hostname.endsWith('.licdn.com')
+            && parsed.hostname !== 'licdn.com'
+        );
+
         return parsed.protocol === 'https:'
             && !parsed.username
             && !parsed.password
             && !parsed.port
-            && parsed.hostname.endsWith('.cdninstagram.com')
-            && parsed.hostname !== 'cdninstagram.com'
+            && safeCdnHost
             ? parsed.toString()
             : null;
     } catch {

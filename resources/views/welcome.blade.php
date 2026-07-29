@@ -204,7 +204,7 @@
                         <p class="eyebrow"><span></span> Platform roadmap</p>
                         <h2 id="platform-heading">Recognized links, honest status.</h2>
                     </div>
-                    <p>YouTube, X, and public Instagram analysis are available now. Download delivery and other providers remain on the roadmap.</p>
+                    <p>YouTube, X, public Instagram, and LinkedIn Beta analysis are available now. Download delivery remains on the roadmap.</p>
                 </div>
 
                 <div class="platform-grid">
@@ -238,9 +238,9 @@
                         <div><h3>Facebook</h3><p>Recognition only</p></div>
                         <span class="status-badge">Planned</span>
                     </article>
-                    <article class="platform-card">
+                    <article class="platform-card is-primary" data-linkedin-extractor-beta>
                         <span class="platform-icon-slot" data-platform-icon="linkedin" aria-hidden="true">in</span>
-                        <div><h3>LinkedIn</h3><p>Early URL preview</p></div>
+                        <div><h3>LinkedIn</h3><p>Public posts, best effort</p></div>
                         <span class="status-badge status-beta">Beta</span>
                     </article>
                 </div>

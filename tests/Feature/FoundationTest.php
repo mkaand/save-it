@@ -25,6 +25,7 @@ class FoundationTest extends TestCase
             ->assertSee('save-it.theme.v1', false)
             ->assertSee('data-platform-icon="youtube"', false)
             ->assertSee('data-platform-icon="linkedin"', false)
+            ->assertSee('data-linkedin-extractor-beta', false)
             ->assertSee('YouTube Shorts')
             ->assertSee('LinkedIn')
             ->assertSee('Beta')

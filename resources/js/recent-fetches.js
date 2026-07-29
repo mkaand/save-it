@@ -40,7 +40,10 @@ export function normalizeRecentFetch(value, analyzedAt = new Date().toISOString(
         mediaType: String(value.mediaType || 'video').slice(0, 40),
         url,
         title: String(value.title || 'Untitled media').slice(0, 160),
-        thumbnailUrl: value.platform === 'instagram'
+        author: typeof value.author === 'string' && value.author.trim()
+            ? value.author.trim().slice(0, 160)
+            : null,
+        thumbnailUrl: ['instagram', 'linkedin'].includes(value.platform)
             ? null
             : safeUrl(value.thumbnailUrl, true),
         analyzedAt: timestamp,

@@ -905,6 +905,12 @@ summary:focus-visible {
     letter-spacing: 0.045em;
 }
 
+.result-beta-label {
+    padding-left: 0.35rem;
+    border-left: 1px solid currentColor;
+    color: var(--warning);
+}
+
 .result-copy h3 {
     margin: 0;
     font-size: clamp(1.25rem, 2.4vw, 1.8rem);
@@ -1025,6 +1031,41 @@ summary:focus-visible {
     color: var(--text-muted);
     font-size: 0.66rem;
     line-height: 1.4;
+}
+
+.linkedin-result-summary {
+    display: grid;
+    gap: 0.35rem;
+    margin: 0 0 1rem;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    line-height: 1.5;
+}
+
+.linkedin-result-summary span {
+    color: var(--text);
+    font-weight: 750;
+}
+
+.linkedin-result-summary p {
+    display: -webkit-box;
+    margin: 0;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+}
+
+.linkedin-warning-list {
+    display: grid;
+    gap: 0.35rem;
+    margin: 0 0 1rem;
+    padding: 0.65rem 0.75rem 0.65rem 1.75rem;
+    border: 1px solid color-mix(in srgb, var(--warning) 32%, var(--border));
+    border-radius: 0.72rem;
+    background: var(--warning-soft);
+    color: var(--text);
+    font-size: 0.68rem;
+    line-height: 1.45;
 }
 
 .youtube-summary {

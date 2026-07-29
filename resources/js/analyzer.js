@@ -12,6 +12,11 @@ import {
     normalizeInstagramAssets,
 } from './instagram-result.js';
 import {
+    linkedinAssetLabel,
+    linkedinAuthor,
+    normalizeLinkedInAssets,
+} from './linkedin-result.js';
+import {
     normalizeXAssets,
     safeResultImageUrl,
     xAssetLabel,
@@ -170,6 +175,9 @@ export function initAnalyzer() {
             platform.append(icon);
         }
         platform.append(document.createTextNode(data.platform_label));
+        if (data.provider_maturity === 'beta') {
+            platform.append(element('span', 'result-beta-label', 'Beta'));
+        }
         meta.append(
             platform,
             element('span', 'result-pill', data.media_type.replaceAll('_', ' ')),
@@ -184,7 +192,9 @@ export function initAnalyzer() {
         const isYouTube = ['youtube', 'youtube_shorts'].includes(data.platform);
         const assets = data.platform === 'x'
             ? normalizeXAssets(data.assets)
-            : (data.platform === 'instagram' ? normalizeInstagramAssets(data.assets) : []);
+            : (data.platform === 'instagram'
+                ? normalizeInstagramAssets(data.assets)
+                : (data.platform === 'linkedin' ? normalizeLinkedInAssets(data.assets) : []));
 
         if (assets.length > 0) {
             const assetLabel = element(
@@ -200,7 +210,9 @@ export function initAnalyzer() {
                     asset.thumbnailUrl,
                     data.platform === 'instagram'
                         ? instagramAssetLabel(asset)
-                        : xAssetLabel(asset),
+                        : (data.platform === 'linkedin'
+                            ? linkedinAssetLabel(asset)
+                            : xAssetLabel(asset)),
                     'x-asset-preview',
                 );
                 const details = element('div', 'x-asset-details');
@@ -210,7 +222,9 @@ export function initAnalyzer() {
                         '',
                         data.platform === 'instagram'
                             ? instagramAssetLabel(asset)
-                            : xAssetLabel(asset),
+                            : (data.platform === 'linkedin'
+                                ? linkedinAssetLabel(asset)
+                                : xAssetLabel(asset)),
                     ),
                     element(
                         'span',
@@ -251,6 +265,29 @@ export function initAnalyzer() {
             });
             groups.append(videoGroup, audioGroup);
             copy.append(summary, groups);
+        }
+
+        if (data.platform === 'linkedin') {
+            const linkedinMeta = element('div', 'linkedin-result-summary');
+            const author = linkedinAuthor(data.metadata);
+            if (author) {
+                linkedinMeta.append(element('span', '', `By ${author}`));
+            }
+            if (typeof data.metadata?.description === 'string' && data.metadata.description) {
+                linkedinMeta.append(element('p', '', data.metadata.description.slice(0, 300)));
+            }
+            copy.append(linkedinMeta);
+
+            if (Array.isArray(data.warnings) && data.warnings.length > 0) {
+                const warnings = element('ul', 'linkedin-warning-list');
+                warnings.setAttribute('aria-label', 'LinkedIn Beta limitations');
+                data.warnings.slice(0, 5).forEach((warning) => {
+                    if (typeof warning === 'string' && warning) {
+                        warnings.append(element('li', '', warning));
+                    }
+                });
+                copy.append(warnings);
+            }
         }
 
         data.outputs.forEach((output) => {
@@ -367,6 +404,9 @@ export function initAnalyzer() {
                 mediaType: payload.data.media_type,
                 url: payload.data.url,
                 title: payload.data.title,
+                author: payload.data.platform === 'linkedin'
+                    ? linkedinAuthor(payload.data.metadata)
+                    : null,
                 thumbnailUrl: payload.data.thumbnail_url,
             });
             renderRecent();
