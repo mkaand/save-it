@@ -189,7 +189,7 @@ final class ExtractorClient
 
         $allowedCapabilities = $isYouTube
             ? ['metadata', 'thumbnails', 'video_formats', 'audio_formats', 'conversion_plans']
-            : ['metadata', 'media_assets', 'video_variants', 'multiple_assets', 'beta'];
+            : ['metadata', 'media_assets', 'video_variants', 'multiple_assets'];
         $capabilities = array_values(array_filter(
             $data['capabilities'],
             fn (mixed $capability): bool => is_string($capability)
@@ -199,7 +199,7 @@ final class ExtractorClient
         $maturity = $data['provider_maturity'] ?? null;
         $warnings = $data['warnings'] ?? null;
         if (
-            ($platform === MediaPlatform::LinkedIn && $maturity !== 'beta')
+            ($platform === MediaPlatform::LinkedIn && $maturity !== 'stable')
             || ($platform !== MediaPlatform::LinkedIn && $maturity !== null)
             || ! is_array($warnings)
             || count($warnings) > 5
@@ -253,6 +253,24 @@ final class ExtractorClient
                 true,
             ),
             'media_count' => $mediaCount,
+            'duration_ms' => $this->nullablePositiveInt($metadata['duration_ms'] ?? null),
+            'width' => $this->nullablePositiveInt($metadata['width'] ?? null),
+            'height' => $this->nullablePositiveInt($metadata['height'] ?? null),
+            'orientation' => in_array(
+                $metadata['orientation'] ?? null,
+                ['portrait', 'landscape', 'square'],
+                true,
+            ) ? $metadata['orientation'] : null,
+            'captions_url' => $this->safeAssetUrl(
+                $metadata['captions_url'] ?? null,
+                MediaPlatform::LinkedIn,
+                $requestId,
+                true,
+            ),
+            'media_asset_id' => $this->nullableString(
+                $metadata['media_asset_id'] ?? null,
+                180,
+            ),
         ];
     }
 
@@ -543,7 +561,12 @@ final class ExtractorClient
             'bitrate' => $this->nullablePositiveInt($variant['bitrate'] ?? null),
             'width' => $this->nullablePositiveInt($variant['width'] ?? null),
             'height' => $this->nullablePositiveInt($variant['height'] ?? null),
+            'fps' => $this->nullablePositiveInt($variant['fps'] ?? null),
+            'container' => in_array($variant['container'] ?? null, ['mp4', 'hls'], true)
+                ? $variant['container']
+                : null,
             'quality_label' => $this->nullableString($variant['quality_label'] ?? null, 40),
+            'filesize' => $this->nullablePositiveInt($variant['filesize'] ?? null),
             'is_preferred' => $variant['is_preferred'],
         ];
     }
@@ -585,10 +608,15 @@ final class ExtractorClient
     {
         $parts = parse_url($url);
         $path = (string) ($parts['path'] ?? '');
+        $postSlug = str_starts_with($path, '/posts/') && str_ends_with($path, '/')
+            ? substr($path, 7, -1)
+            : '';
         $validPath = $variant === 'activity'
             ? preg_match('#^/feed/update/urn:li:activity:[0-9]{6,30}/$#', $path) === 1
             : ($variant === 'post'
-                && preg_match('#^/posts/[A-Za-z0-9._~-]{3,300}/$#', $path) === 1);
+                && strlen($postSlug) >= 3
+                && strlen($postSlug) <= 900
+                && preg_match('#^(?:[A-Za-z0-9._~-]|%[A-Fa-f0-9]{2})+$#', $postSlug) === 1);
 
         return filter_var($url, FILTER_VALIDATE_URL) !== false
             && is_array($parts)
@@ -815,7 +843,7 @@ final class ExtractorClient
             'invalid_x_post_url' => 'Enter a valid X post URL.',
             'invalid_instagram_media_url' => 'Enter a valid Instagram post or reel URL.',
             'invalid_youtube_video_url' => 'Enter a valid YouTube video or Shorts URL.',
-            'invalid_linkedin_post_url' => 'LinkedIn Beta supports public post URLs only.',
+            'invalid_linkedin_post_url' => 'LinkedIn supports public post URLs only.',
             'linkedin_short_url_not_supported' => 'LinkedIn short links are not supported. Use the full public post URL.',
             'playlist_not_supported' => 'YouTube playlists are not supported. Submit a single video URL.',
             'live_not_supported' => 'YouTube live and scheduled live videos are not supported.',

@@ -1,0 +1,264 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Jobs\PrepareDownloadJob;
+use App\Services\Downloads\DownloadAssetStore;
+use App\Services\Downloads\DownloadPipeline;
+use App\Services\Downloads\UpstreamFileDownloader;
+use App\Services\Downloads\UpstreamUrlPolicy;
+use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Http;
+use Tests\TestCase;
+use ZipArchive;
+
+class DownloadDeliveryTest extends TestCase
+{
+    protected function setUp(): void
+    {
+        parent::setUp();
+        config([
+            'cache.default' => 'array',
+            'services.downloads.token_ttl_seconds' => 600,
+            'services.downloads.max_file_bytes' => 1024,
+            'services.downloads.max_zip_assets' => 10,
+            'services.downloads.max_zip_bytes' => 4096,
+        ]);
+        $this->app->bind(UpstreamUrlPolicy::class, fn () => new class extends UpstreamUrlPolicy
+        {
+            protected function resolveAddresses(string $host): array
+            {
+                return ['8.8.8.8'];
+            }
+        });
+    }
+
+    public function test_signed_download_token_rejects_tampering_and_expiry(): void
+    {
+        $store = $this->app->make(DownloadAssetStore::class);
+        $token = $store->issue($this->asset());
+
+        $this->assertSame('x', $store->resolve($token)['provider']);
+
+        $tampered = substr($token, 0, -1).($token[-1] === 'a' ? 'b' : 'a');
+        $this->getJson("/api/downloads/{$tampered}")
+            ->assertGone()
+            ->assertJsonPath('error.code', 'download_token_expired');
+
+        Cache::flush();
+        $this->getJson("/api/downloads/{$token}")
+            ->assertGone()
+            ->assertJsonPath('error.code', 'download_token_expired');
+    }
+
+    public function test_proxy_forwards_one_range_and_preserves_partial_response(): void
+    {
+        Http::fake(function ($request) {
+            $this->assertSame('bytes=0-0', $request->header('Range')[0] ?? null);
+
+            return Http::response('x', 206, [
+                'Content-Type' => 'video/mp4',
+                'Content-Length' => '1',
+                'Content-Range' => 'bytes 0-0/100',
+                'Accept-Ranges' => 'bytes',
+            ]);
+        });
+        $token = $this->app->make(DownloadAssetStore::class)->issue($this->asset());
+
+        $response = $this->withHeader('Range', 'bytes=0-0')->get("/api/downloads/{$token}");
+
+        $response->assertStatus(206)
+            ->assertHeader('Content-Type', 'video/mp4')
+            ->assertHeader('Content-Range', 'bytes 0-0/100')
+            ->assertHeader('Accept-Ranges', 'bytes')
+            ->assertHeader('Content-Disposition');
+        $this->assertSame('x', $response->streamedContent());
+    }
+
+    public function test_multiple_ranges_are_rejected_without_upstream_request(): void
+    {
+        Http::fake();
+        $token = $this->app->make(DownloadAssetStore::class)->issue($this->asset());
+
+        $this->withHeader('Range', 'bytes=0-1,4-5')
+            ->getJson("/api/downloads/{$token}")
+            ->assertStatus(416)
+            ->assertJsonPath('error.code', 'range_not_satisfiable');
+        Http::assertNothingSent();
+    }
+
+    public function test_upstream_416_preserves_safe_unsatisfied_content_range(): void
+    {
+        Http::fake([
+            '*' => Http::response('', 416, ['Content-Range' => 'bytes */100']),
+        ]);
+        $token = $this->app->make(DownloadAssetStore::class)->issue($this->asset());
+
+        $this->withHeader('Range', 'bytes=200-300')
+            ->getJson("/api/downloads/{$token}")
+            ->assertStatus(416)
+            ->assertHeader('Content-Range', 'bytes */100')
+            ->assertJsonPath('error.code', 'range_not_satisfiable');
+    }
+
+    public function test_range_total_size_is_enforced(): void
+    {
+        Http::fake([
+            '*' => Http::response('x', 206, [
+                'Content-Type' => 'video/mp4',
+                'Content-Length' => '1',
+                'Content-Range' => 'bytes 0-0/2048',
+            ]),
+        ]);
+        $token = $this->app->make(DownloadAssetStore::class)->issue([
+            ...$this->asset(),
+            'expected_size' => null,
+        ]);
+
+        $this->withHeader('Range', 'bytes=0-0')
+            ->getJson("/api/downloads/{$token}")
+            ->assertStatus(413)
+            ->assertJsonPath('error.code', 'media_too_large');
+    }
+
+    public function test_job_endpoint_dispatches_only_a_signed_supported_plan(): void
+    {
+        Bus::fake();
+        $store = $this->app->make(DownloadAssetStore::class);
+        $token = $store->issue([
+            'mode' => 'youtube_mp3',
+            'filename' => 'audio.mp3',
+            'bitrate_kbps' => 192,
+            'sources' => [[
+                'provider' => 'youtube',
+                'normalized_url' => 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+                'format_id' => '140',
+            ]],
+        ]);
+
+        $response = $this->postJson('/api/download-jobs', ['token' => $token])
+            ->assertAccepted()
+            ->assertJsonPath('data.status', 'queued')
+            ->assertJsonPath('data.stage', 'Preparing');
+
+        $this->assertStringStartsWith('/api/download-jobs/', $response->json('data.status_url'));
+        Bus::assertDispatched(PrepareDownloadJob::class);
+        $this->postJson('/api/download-jobs', ['token' => $token])
+            ->assertGone()
+            ->assertJsonPath('error.code', 'download_token_expired');
+    }
+
+    public function test_upstream_errors_and_unsupported_mime_are_sanitized(): void
+    {
+        Http::fake([
+            '*' => Http::response('<script>secret</script>', 200, [
+                'Content-Type' => 'text/html',
+            ]),
+        ]);
+        $token = $this->app->make(DownloadAssetStore::class)->issue($this->asset());
+
+        $response = $this->getJson("/api/downloads/{$token}")
+            ->assertUnprocessable()
+            ->assertJsonPath('error.code', 'unsupported_media_type');
+        $this->assertStringNotContainsString('secret', $response->getContent());
+        $this->assertStringNotContainsString('twimg.com', $response->getContent());
+    }
+
+    public function test_zip_pipeline_streams_bounded_assets_with_safe_unique_names(): void
+    {
+        Http::fakeSequence()
+            ->push('first-image', 200, ['Content-Type' => 'image/jpeg'])
+            ->push('second-image', 200, ['Content-Type' => 'image/jpeg']);
+
+        $result = $this->app->make(DownloadPipeline::class)->prepare([
+            'mode' => 'zip',
+            'filename' => 'post-media.zip',
+            'sources' => [
+                [
+                    'provider' => 'x',
+                    'upstream_url' => 'https://pbs.twimg.com/media/first.jpg',
+                    'filename' => '../same-name.jpg',
+                ],
+                [
+                    'provider' => 'x',
+                    'upstream_url' => 'https://pbs.twimg.com/media/second.jpg',
+                    'filename' => '../same-name.jpg',
+                ],
+            ],
+        ], static fn (): null => null);
+
+        try {
+            Http::assertSent(
+                static fn ($request): bool => $request->hasHeader('Range', 'bytes=0-4095'),
+            );
+            $this->assertSame('application/zip', $result['mime_type']);
+            $this->assertGreaterThan(0, $result['size']);
+
+            $archive = new ZipArchive;
+            $this->assertTrue($archive->open($result['path']) === true);
+            $this->assertSame('01-same-name.jpg', $archive->getNameIndex(0));
+            $this->assertSame('02-same-name.jpg', $archive->getNameIndex(1));
+            $this->assertSame('first-image', $archive->getFromIndex(0));
+            $this->assertSame('second-image', $archive->getFromIndex(1));
+            $archive->close();
+        } finally {
+            File::deleteDirectory(dirname($result['path']));
+        }
+    }
+
+    public function test_job_downloader_assembles_validated_range_chunks(): void
+    {
+        Http::fakeSequence()
+            ->push('abc', 206, [
+                'Content-Type' => 'video/mp4',
+                'Content-Length' => '3',
+                'Content-Range' => 'bytes 0-2/5',
+            ])
+            ->push('de', 206, [
+                'Content-Type' => 'video/mp4',
+                'Content-Length' => '2',
+                'Content-Range' => 'bytes 3-4/5',
+            ]);
+        $path = storage_path('app/private/range-chunks-'.bin2hex(random_bytes(4)));
+
+        try {
+            $written = $this->app->make(UpstreamFileDownloader::class)->download(
+                [
+                    'provider' => 'x',
+                    'upstream_url' => 'https://video.twimg.com/media/video.mp4',
+                    'expected_size' => 5,
+                ],
+                $path,
+                16 * 1024 * 1024,
+            );
+            $this->assertSame(5, $written);
+            $this->assertSame('abcde', file_get_contents($path));
+            Http::assertSentCount(2);
+            $this->assertSame(
+                [['bytes=0-4'], ['bytes=3-4']],
+                Http::recorded()->map(
+                    static fn (array $pair): array => $pair[0]->header('Range'),
+                )->all(),
+            );
+        } finally {
+            File::delete($path);
+        }
+    }
+
+    /** @return array<string, mixed> */
+    private function asset(): array
+    {
+        return [
+            'version' => 1,
+            'mode' => 'proxy',
+            'provider' => 'x',
+            'asset_id' => 'asset-1',
+            'upstream_url' => 'https://video.twimg.com/media/video.mp4?token=sensitive',
+            'mime_type' => 'video/mp4',
+            'filename' => "Safe title\r\n.mp4",
+            'expected_size' => 100,
+        ];
+    }
+}
