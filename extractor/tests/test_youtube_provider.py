@@ -274,6 +274,46 @@ def test_client_rejects_noncanonical_input_before_constructing_extractor() -> No
     assert constructed is False
 
 
+def test_format_resolution_returns_only_a_validated_googlevideo_source() -> None:
+    class ResolverYoutubeDL(FakeYoutubeDL):
+        def extract_info(self, url: str, download: bool) -> dict[str, Any]:
+            payload = youtube_payload()
+            payload["formats"][0]["url"] = (
+                "https://rr1---sn-example.googlevideo.com/videoplayback?expire=1"
+            )
+            return payload
+
+    client = YouTubeMetadataClient(extractor_factory=ResolverYoutubeDL)
+    source = asyncio.run(
+        client.resolve_format(
+            f"https://www.youtube.com/watch?v={VIDEO_ID}",
+            "399",
+        )
+    )
+
+    assert source["url"].startswith("https://rr1---sn-example.googlevideo.com/")
+    assert source["mime_type"] == "video/mp4"
+    assert "cookie" not in source
+
+
+def test_format_resolution_rejects_arbitrary_hosts() -> None:
+    class UnsafeYoutubeDL(FakeYoutubeDL):
+        def extract_info(self, url: str, download: bool) -> dict[str, Any]:
+            payload = youtube_payload()
+            payload["formats"][0]["url"] = "https://example.com/video.mp4"
+            return payload
+
+    with pytest.raises(ProviderError) as exception:
+        asyncio.run(
+            YouTubeMetadataClient(extractor_factory=UnsafeYoutubeDL).resolve_format(
+                f"https://www.youtube.com/watch?v={VIDEO_ID}",
+                "399",
+            )
+        )
+
+    assert exception.value.code == "provider_response_changed"
+
+
 def test_adapter_returns_ready_short_contract() -> None:
     class FakeClient:
         async def fetch(self, _url: str) -> dict[str, Any]:

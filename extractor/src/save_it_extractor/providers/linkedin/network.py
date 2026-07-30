@@ -1,4 +1,3 @@
-import asyncio
 import ipaddress
 import socket
 from dataclasses import dataclass
@@ -219,8 +218,7 @@ async def _validate_remote_url(raw_url: str) -> None:
         )
 
     try:
-        records = await asyncio.to_thread(
-            socket.getaddrinfo,
+        records = socket.getaddrinfo(
             hostname,
             443,
             type=socket.SOCK_STREAM,

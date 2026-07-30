@@ -1,7 +1,7 @@
 import ipaddress
 import re
 from dataclasses import dataclass
-from urllib.parse import SplitResult, parse_qs, urlsplit, urlunsplit
+from urllib.parse import SplitResult, parse_qs, quote, unquote, urlsplit, urlunsplit
 
 from save_it_extractor.domain.models import PROVIDER_LABELS, Provider, ProviderContext
 
@@ -115,9 +115,10 @@ INSTAGRAM_MEDIA_PATH = re.compile(r"^/(p|reel)/([A-Za-z0-9_-]{5,64})/?$")
 YOUTUBE_VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
 YOUTUBE_SHORTS_PATH = re.compile(r"^/shorts/([A-Za-z0-9_-]{11})/?$")
 YOUTUBE_SHORT_URL_PATH = re.compile(r"^/([A-Za-z0-9_-]{11})/?$")
-LINKEDIN_POST_PATH = re.compile(r"^/posts/([A-Za-z0-9._~-]{3,300})/?$")
+LINKEDIN_POST_PATH = re.compile(r"^/posts/([^/]{3,600})/?$")
 LINKEDIN_ACTIVITY_PATH = re.compile(r"^/feed/update/urn:li:activity:([0-9]{6,30})/?$")
 LINKEDIN_ACTIVITY_IN_SLUG = re.compile(r"(?:^|[-_])activity[-_:]([0-9]{6,30})(?:[-_]|$)")
+INVALID_PERCENT_ENCODING = re.compile(r"%(?![A-Fa-f0-9]{2})")
 
 
 def _normalize_x_url(hostname: str, parsed: SplitResult) -> str:
@@ -201,16 +202,35 @@ def _normalize_linkedin_url(hostname: str, parsed: SplitResult) -> str:
 
     post = LINKEDIN_POST_PATH.fullmatch(parsed.path)
     if post is not None:
-        slug = post.group(1)
-        embedded_activity = LINKEDIN_ACTIVITY_IN_SLUG.search(slug)
-        if embedded_activity is not None:
-            activity_id = embedded_activity.group(1)
-            return f"https://www.linkedin.com/feed/update/urn:li:activity:{activity_id}/"
-        return f"https://www.linkedin.com/posts/{slug}/"
+        raw_slug = post.group(1)
+        if INVALID_PERCENT_ENCODING.search(raw_slug):
+            raise UrlValidationError(
+                "invalid_linkedin_post_url",
+                "LinkedIn supports public post URLs only.",
+            )
+        try:
+            decoded_slug = unquote(raw_slug, errors="strict")
+        except UnicodeDecodeError as exception:
+            raise UrlValidationError(
+                "invalid_linkedin_post_url",
+                "LinkedIn supports public post URLs only.",
+            ) from exception
+        if (
+            not decoded_slug
+            or len(decoded_slug) > 300
+            or any(ord(character) < 32 for character in decoded_slug)
+            or LINKEDIN_ACTIVITY_IN_SLUG.search(decoded_slug) is None
+        ):
+            raise UrlValidationError(
+                "invalid_linkedin_post_url",
+                "LinkedIn supports public post URLs only.",
+            )
+        canonical_slug = quote(decoded_slug, safe="-._~")
+        return f"https://www.linkedin.com/posts/{canonical_slug}/"
 
     raise UrlValidationError(
         "invalid_linkedin_post_url",
-        "LinkedIn Beta supports public post URLs only.",
+        "LinkedIn supports public post URLs only.",
     )
 
 

@@ -107,7 +107,7 @@ def test_x_success_uses_versioned_data_contract(monkeypatch: pytest.MonkeyPatch)
     assert "traceback" not in response.text.lower()
 
 
-def test_linkedin_success_exposes_beta_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_linkedin_success_exposes_stable_contract(monkeypatch: pytest.MonkeyPatch) -> None:
     result = ExtractResult(
         request_id="contract-test-linkedin",
         provider=Provider.LINKEDIN,
@@ -122,8 +122,8 @@ def test_linkedin_success_exposes_beta_contract(monkeypatch: pytest.MonkeyPatch)
             "media_count": 1,
         },
         assets=[{"id": "asset-1", "type": "image", "order": 1}],
-        capabilities=["metadata", "beta", "media_assets"],
-        maturity="beta",
+        capabilities=["metadata", "media_assets"],
+        maturity="stable",
         warnings=["Public availability depends on LinkedIn's current unauthenticated response."],
     )
     monkeypatch.setattr(main.service, "extract", AsyncMock(return_value=result))
@@ -140,7 +140,7 @@ def test_linkedin_success_exposes_beta_contract(monkeypatch: pytest.MonkeyPatch)
     data = response.json()["data"]
     assert data["provider"] == "linkedin"
     assert data["provider_variant"] == "post"
-    assert data["provider_maturity"] == "beta"
+    assert data["provider_maturity"] == "stable"
     assert data["warnings"]
     assert data["status"] == "ready"
     assert "traceback" not in response.text.lower()
@@ -185,6 +185,39 @@ def test_youtube_success_uses_versioned_data_contract(monkeypatch: pytest.Monkey
     assert data["assets"] == []
     assert "download_url" not in response.text
     assert "traceback" not in response.text.lower()
+
+
+def test_youtube_source_resolution_contract_is_internal_and_bounded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeResolver:
+        async def resolve_format(self, url: str, format_id: str) -> dict[str, object]:
+            assert url == "https://www.youtube.com/watch?v=abcdefghijk"
+            assert format_id == "140"
+            return {
+                "url": "https://rr1---sn-example.googlevideo.com/videoplayback?expire=1",
+                "mime_type": "audio/mp4",
+                "estimated_filesize": 1234,
+            }
+
+    monkeypatch.setattr(main, "youtube_client", FakeResolver())
+
+    response = client.post(
+        "/v1/youtube/resolve",
+        json={
+            "url": "https://www.youtube.com/watch?v=abcdefghijk",
+            "format_id": "140",
+            "request_id": "resolve-youtube",
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["request_id"] == "resolve-youtube"
+    assert data["provider"] == "youtube"
+    assert data["format_id"] == "140"
+    assert data["mime_type"] == "audio/mp4"
+    assert "cookie" not in response.text.lower()
 
 
 def test_readiness_is_safe() -> None:

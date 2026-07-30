@@ -4,9 +4,9 @@ from save_it_extractor.domain.models import ExtractResult, Provider, ProviderCon
 from save_it_extractor.providers.linkedin.network import LinkedInMetadataClient
 from save_it_extractor.providers.linkedin.parser import parse_linkedin_document
 
-LINKEDIN_BETA_WARNINGS = [
+LINKEDIN_WARNINGS = [
     "Public availability depends on LinkedIn's current unauthenticated response.",
-    "Some posts may require signing in and cannot be analyzed.",
+    "Posts that require signing in cannot be analyzed.",
 ]
 
 
@@ -21,7 +21,7 @@ class LinkedInProviderAdapter:
             document,
             context.normalized_url,
         )
-        capabilities = ["metadata", "beta"]
+        capabilities = ["metadata"]
         if assets:
             capabilities.append("media_assets")
         if len(assets) > 1:
@@ -38,6 +38,6 @@ class LinkedInProviderAdapter:
             metadata=metadata,
             assets=assets,
             capabilities=capabilities,
-            maturity="beta",
-            warnings=LINKEDIN_BETA_WARNINGS,
+            maturity="stable",
+            warnings=LINKEDIN_WARNINGS,
         )
