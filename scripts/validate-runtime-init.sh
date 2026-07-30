@@ -3,7 +3,19 @@ set -euo pipefail
 
 image="${1:-media-downloader-app:local}"
 fixture="$(mktemp -d)"
-trap 'rm -rf "$fixture"' EXIT
+
+cleanup() {
+    docker run --rm \
+        --network none \
+        --security-opt no-new-privileges:true \
+        -v "$fixture:/fixture" \
+        --entrypoint sh \
+        "$image" \
+        -eu -c 'find /fixture -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +'
+    rm -rf "$fixture"
+}
+
+trap cleanup EXIT
 
 install -d -m 0700 \
     "$fixture/storage/logs" \
