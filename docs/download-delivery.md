@@ -42,6 +42,9 @@ to prevent duplicate conversion or ZIP work.
 - accepts only one RFC byte range;
 - preserves `200`, `206`, `Content-Length`, `Content-Range`, `Accept-Ranges`, and
   safe `416` behavior;
+- emits `Accept-Ranges: bytes` only after validating a `206` response, a syntactically
+  valid byte `Content-Range`, and a matching partial `Content-Length`; a full `200`
+  response does not advertise unvalidated range support;
 - validates the media MIME, declared or range-total size, and maximum size; sources
   with no safe declared or expected size fail closed;
 - streams in 64 KiB chunks without loading the complete body into PHP memory;
