@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Testing\Fluent\AssertableJson;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
@@ -87,7 +88,10 @@ class AnalyzeEndpointTest extends TestCase
         ])
             ->assertOk()
             ->assertJsonPath('data.url', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ')
-            ->assertJsonPath('data.thumbnail_url', 'https://i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg');
+            ->assertJson(fn (AssertableJson $json) => $json
+                ->whereType('data.thumbnail_url', 'string')
+                ->where('data.thumbnail_url', fn (string $url): bool => str_starts_with($url, '/api/downloads/'))
+                ->etc());
     }
 
     public function test_it_rejects_invalid_youtube_video_ids(): void
@@ -154,7 +158,7 @@ class AnalyzeEndpointTest extends TestCase
             );
     }
 
-    public function test_no_preview_output_claims_to_be_available(): void
+    public function test_ready_outputs_use_scoped_save_it_delivery_links(): void
     {
         $this->fakeRecognition(
             'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
@@ -166,12 +170,18 @@ class AnalyzeEndpointTest extends TestCase
         ])->assertOk();
 
         foreach ($response->json('data.outputs') as $output) {
-            $this->assertFalse($output['available']);
+            $this->assertTrue($output['available']);
             $this->assertArrayNotHasKey('size', $output);
-            $this->assertArrayNotHasKey('download_url', $output);
+            $this->assertContains($output['delivery'], ['proxy', 'job']);
+            if ($output['delivery'] === 'proxy') {
+                $this->assertStringStartsWith('/api/downloads/', $output['download_url']);
+            } else {
+                $this->assertSame('/api/download-jobs', $output['job_url']);
+            }
         }
 
         $content = $response->getContent();
+        $this->assertStringNotContainsString('googlevideo.com', $content);
         $this->assertStringNotContainsString('APP_KEY', $content);
         $this->assertStringNotContainsString('stack', strtolower($content));
     }
@@ -393,7 +403,7 @@ class AnalyzeEndpointTest extends TestCase
                 'source_url' => $sourceUrl,
                 'normalized_url' => 'https://www.linkedin.com/feed/update/urn:li:activity:1234567890123456789/',
                 'status' => 'ready',
-                'provider_maturity' => 'beta',
+                'provider_maturity' => 'stable',
                 'warnings' => [
                     "Public availability depends on LinkedIn's current unauthenticated response.",
                 ],
@@ -421,7 +431,7 @@ class AnalyzeEndpointTest extends TestCase
                     'alt_text' => null,
                     'variants' => [],
                 ]],
-                'capabilities' => ['metadata', 'media_assets', 'beta'],
+                'capabilities' => ['metadata', 'media_assets'],
             ],
         ];
     }

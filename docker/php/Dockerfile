@@ -21,6 +21,7 @@ ARG APP_GID=1000
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         curl \
+        ffmpeg \
         gosu \
         libzip-dev \
         unzip \

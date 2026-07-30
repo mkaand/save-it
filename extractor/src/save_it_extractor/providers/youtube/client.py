@@ -3,6 +3,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit
 
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
@@ -40,6 +41,48 @@ class YouTubeMetadataClient:
             )
 
         return await asyncio.to_thread(self._fetch_sync, canonical_url)
+
+    async def resolve_format(self, canonical_url: str, format_id: str) -> dict[str, Any]:
+        payload = await self.fetch(canonical_url)
+        formats = payload.get("formats")
+        if not isinstance(formats, list):
+            raise ProviderError(
+                "provider_response_changed",
+                "YouTube returned metadata in an unsupported format.",
+                502,
+                {"provider": "youtube"},
+            )
+        selected = next(
+            (
+                item
+                for item in formats
+                if isinstance(item, dict) and item.get("format_id") == format_id
+            ),
+            None,
+        )
+        if not isinstance(selected, dict):
+            raise ProviderError(
+                "format_unavailable",
+                "The selected YouTube format is no longer available.",
+                410,
+                {"provider": "youtube"},
+            )
+        source_url = _safe_googlevideo_url(selected.get("url"))
+        if source_url is None:
+            raise ProviderError(
+                "provider_response_changed",
+                "YouTube returned an unsafe media source.",
+                502,
+                {"provider": "youtube"},
+            )
+
+        return {
+            "url": source_url,
+            "mime_type": _format_mime(selected),
+            "estimated_filesize": _positive_int(
+                selected.get("filesize") or selected.get("filesize_approx")
+            ),
+        }
 
     def _fetch_sync(self, canonical_url: str) -> dict[str, Any]:
         options: dict[str, Any] = {
@@ -125,3 +168,38 @@ def _safe_download_error(exception: DownloadError) -> ProviderError:
         503,
         {"provider": "youtube"},
     )
+
+
+def _safe_googlevideo_url(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return None
+    host = (parsed.hostname or "").lower().rstrip(".")
+    if (
+        parsed.scheme != "https"
+        or not host.endswith(".googlevideo.com")
+        or host == "googlevideo.com"
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.port is not None
+    ):
+        return None
+
+    return value
+
+
+def _format_mime(value: dict[str, Any]) -> str | None:
+    container = value.get("ext")
+    vcodec = value.get("vcodec")
+    if container == "mp4":
+        return "audio/mp4" if vcodec in {None, "none"} else "video/mp4"
+    if container == "webm":
+        return "audio/webm" if vcodec in {None, "none"} else "video/webm"
+    return None
+
+
+def _positive_int(value: Any) -> int | None:
+    return value if isinstance(value, int) and value > 0 else None

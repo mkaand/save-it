@@ -136,6 +136,9 @@ jobs:
       - name: Validate Nginx configuration
         run: docker run --rm media-downloader-nginx:local nginx -t
 
+      - name: Validate FFmpeg merge and MP3 conversion
+        run: docker run --rm --entrypoint /var/www/html/scripts/validate-ffmpeg.sh media-downloader-app:local
+
       - name: Verify image manifests match
         run: |
           app_sha="$(docker run --rm --entrypoint sha256sum media-downloader-app:local /var/www/html/public/build/manifest.json | cut -d' ' -f1)"

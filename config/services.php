@@ -41,6 +41,18 @@ return [
         'connect_timeout_seconds' => (float) env('EXTRACTOR_CONNECT_TIMEOUT_SECONDS', 2),
     ],
 
+    'downloads' => [
+        'token_ttl_seconds' => (int) env('DOWNLOAD_TOKEN_TTL_SECONDS', 600),
+        'job_ttl_seconds' => (int) env('DOWNLOAD_JOB_TTL_SECONDS', 3600),
+        'connect_timeout_seconds' => (float) env('DOWNLOAD_CONNECT_TIMEOUT_SECONDS', 3),
+        'timeout_seconds' => (float) env('DOWNLOAD_TIMEOUT_SECONDS', 120),
+        'max_redirects' => (int) env('DOWNLOAD_MAX_REDIRECTS', 3),
+        'max_file_bytes' => (int) env('DOWNLOAD_MAX_FILE_BYTES', 536870912),
+        'max_zip_assets' => (int) env('DOWNLOAD_MAX_ZIP_ASSETS', 20),
+        'max_zip_bytes' => (int) env('DOWNLOAD_MAX_ZIP_BYTES', 1073741824),
+        'job_timeout_seconds' => (int) env('DOWNLOAD_JOB_TIMEOUT_SECONDS', 900),
+    ],
+
     'umami' => [
         'enabled' => (bool) env('UMAMI_ENABLED', false),
         'script_url' => env('UMAMI_SCRIPT_URL'),

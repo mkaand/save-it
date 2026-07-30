@@ -28,6 +28,11 @@ import {
     youtubeAudioFormatLabel,
     youtubeVideoFormatLabel,
 } from './youtube-result.js';
+import {
+    normalizeDownloadDelivery,
+    normalizeJobStart,
+    normalizeJobStatus,
+} from './download-delivery.js';
 
 function browserStorage() {
     try {
@@ -163,6 +168,71 @@ export function initAnalyzer() {
         submitLabel.textContent = loading ? 'Analyzing…' : 'Analyze URL';
     }
 
+    async function startDownload(output, button) {
+        if (!output.available || button.dataset.busy === 'true') {
+            return;
+        }
+        button.dataset.busy = 'true';
+        button.disabled = true;
+        const detail = button.querySelector('span');
+
+        const delivery = normalizeDownloadDelivery(output);
+        try {
+            if (!delivery) {
+                throw new Error('This output is not available.');
+            }
+            if (delivery.type === 'proxy') {
+                window.location.assign(delivery.url);
+                return;
+            }
+
+            detail.textContent = 'Preparing…';
+            const started = await fetch(delivery.url, {
+                method: 'POST',
+                headers: {
+                    Accept: 'application/json',
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ token: delivery.token }),
+            });
+            const startPayload = await started.json();
+            const statusUrl = normalizeJobStart(startPayload);
+            if (!started.ok || !statusUrl) {
+                throw new Error(startPayload?.error?.message || 'The download could not be prepared.');
+            }
+
+            for (let attempt = 0; attempt < 180; attempt += 1) {
+                await new Promise((resolve) => window.setTimeout(resolve, 1500));
+                const response = await fetch(statusUrl, {
+                    headers: { Accept: 'application/json' },
+                });
+                const payload = await response.json();
+                const state = normalizeJobStatus(payload);
+                if (!response.ok) {
+                    throw new Error(payload?.error?.message || 'The download job expired.');
+                }
+                if (!state) {
+                    throw new Error('The download service returned an invalid status.');
+                }
+                detail.textContent = `${state.stage} · ${state.progress}%`;
+                if (state.status === 'ready' && state.downloadUrl) {
+                    window.location.assign(state.downloadUrl);
+                    return;
+                }
+                if (state.status === 'failed') {
+                    throw new Error(state.error || 'The download could not be prepared.');
+                }
+            }
+            throw new Error('The download preparation timed out.');
+        } catch (downloadError) {
+            setStatus(downloadError.message || 'The download could not be prepared.', 'error');
+        } finally {
+            button.dataset.busy = 'false';
+            button.disabled = false;
+            detail.textContent = output.detail;
+        }
+    }
+
     function renderResult(data) {
         resultPanel.replaceChildren();
 
@@ -187,7 +257,7 @@ export function initAnalyzer() {
         const title = element('h3', '', data.title);
         const url = element('p', 'result-url', data.url);
         url.title = data.url;
-        const outputLabel = element('p', 'output-label', 'Planned output options');
+        const outputLabel = element('p', 'output-label', 'Download options');
         const outputs = element('div', 'output-grid');
         const isYouTube = ['youtube', 'youtube_shorts'].includes(data.platform);
         const assets = data.platform === 'x'
@@ -280,7 +350,7 @@ export function initAnalyzer() {
 
             if (Array.isArray(data.warnings) && data.warnings.length > 0) {
                 const warnings = element('ul', 'linkedin-warning-list');
-                warnings.setAttribute('aria-label', 'LinkedIn Beta limitations');
+                warnings.setAttribute('aria-label', 'LinkedIn availability notes');
                 data.warnings.slice(0, 5).forEach((warning) => {
                     if (typeof warning === 'string' && warning) {
                         warnings.append(element('li', '', warning));
@@ -293,12 +363,21 @@ export function initAnalyzer() {
         data.outputs.forEach((output) => {
             const button = element('button', 'output-option');
             button.type = 'button';
-            button.disabled = true;
-            button.setAttribute('aria-label', `${output.label}: ${output.detail}. Coming in the next step.`);
+            button.disabled = !output.available;
+            button.classList.toggle('is-available', output.available === true);
+            button.setAttribute(
+                'aria-label',
+                output.available
+                    ? `Download ${output.label}: ${output.detail}`
+                    : `${output.label}: ${output.detail}. Not available.`,
+            );
             button.append(
                 element('strong', '', output.label),
-                element('span', '', `${output.detail} · Coming next`),
+                element('span', '', output.available ? output.detail : `${output.detail} · Not available`),
             );
+            if (output.available) {
+                button.addEventListener('click', () => startDownload(output, button));
+            }
             outputs.append(button);
         });
 
@@ -307,7 +386,7 @@ export function initAnalyzer() {
             outputLabel,
             outputs,
                 element('p', 'output-note', data.status === 'ready'
-                    ? `${data.platform_label} metadata is ready. Download and stream merging arrive in PR #9.`
+                    ? `${data.platform_label} media is ready. Links expire, so analyze again if needed.`
                     : 'This is a format preview. Download controls become available with the media engine.'),
         );
         resultPanel.append(media, copy);
@@ -410,7 +489,7 @@ export function initAnalyzer() {
                 thumbnailUrl: payload.data.thumbnail_url,
             });
             renderRecent();
-            setStatus('Analysis complete. Planned formats are ready to review.', 'success');
+            setStatus('Analysis complete. Available downloads are ready to review.', 'success');
         } catch (requestError) {
             const message = requestError instanceof TypeError
                 ? 'Network error. Check your connection and try again.'

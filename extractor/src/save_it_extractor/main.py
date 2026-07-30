@@ -9,11 +9,12 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from save_it_extractor.api.errors import ContractError, error_response
-from save_it_extractor.api.models import ExtractRequest
+from save_it_extractor.api.models import ExtractRequest, ResolveYouTubeRequest
 from save_it_extractor.config import settings
-from save_it_extractor.domain.urls import UrlValidationError
+from save_it_extractor.domain.urls import UrlValidationError, classify_url
 from save_it_extractor.logging import log_event
 from save_it_extractor.providers.errors import ProviderError
+from save_it_extractor.providers.youtube.client import YouTubeMetadataClient
 from save_it_extractor.services.extractor import ExtractionService
 
 
@@ -33,6 +34,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 service = ExtractionService()
+youtube_client = YouTubeMetadataClient()
 
 
 @app.middleware("http")
@@ -236,4 +238,58 @@ async def extract(payload: ExtractRequest, request: Request) -> JSONResponse:
                 "warnings": result.warnings,
             },
         )
+    )
+
+
+@app.post("/v1/youtube/resolve")
+async def resolve_youtube(payload: ResolveYouTubeRequest, request: Request) -> JSONResponse:
+    request_id = payload.request_id or request.state.request_id
+    request.state.request_id = request_id
+    try:
+        async with asyncio.timeout(settings.request_timeout_seconds):
+            context = classify_url(payload.url)
+            if context.provider.value != "youtube":
+                raise UrlValidationError(
+                    "unsupported_host",
+                    "The submitted host is not supported.",
+                )
+            source = await youtube_client.resolve_format(
+                context.normalized_url,
+                payload.format_id,
+            )
+    except UrlValidationError as exception:
+        return error_response(ContractError(exception.code, exception.message, 422, request_id))
+    except TimeoutError:
+        return error_response(
+            ContractError(
+                "upstream_unavailable",
+                "The format resolution request exceeded its processing deadline.",
+                503,
+                request_id,
+            )
+        )
+    except ProviderError as exception:
+        return error_response(
+            ContractError(
+                exception.code,
+                exception.message,
+                exception.status_code,
+                request_id,
+                exception.details,
+            )
+        )
+
+    request.state.provider = "youtube"
+    return JSONResponse(
+        status_code=200,
+        content={
+            "data": {
+                "request_id": request_id,
+                "provider": "youtube",
+                "normalized_url": context.normalized_url,
+                "format_id": payload.format_id,
+                **source,
+            }
+        },
+        headers={"X-Request-ID": request_id},
     )

@@ -64,7 +64,7 @@ def test_youtube_uses_real_adapter() -> None:
     assert type(registry.get(Provider.YOUTUBE)).__name__ == "YouTubeProviderAdapter"
 
 
-def test_linkedin_uses_real_beta_adapter() -> None:
+def test_linkedin_uses_production_adapter() -> None:
     registry = ProviderRegistry()
 
     assert type(registry.get(Provider.LINKEDIN)).__name__ == "LinkedInProviderAdapter"

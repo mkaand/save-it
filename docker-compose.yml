@@ -30,6 +30,15 @@ x-app-service: &app-service
     EXTRACTOR_BASE_URL: "${EXTRACTOR_BASE_URL:-http://extractor:8000}"
     EXTRACTOR_TIMEOUT_SECONDS: "${EXTRACTOR_TIMEOUT_SECONDS:-15}"
     EXTRACTOR_CONNECT_TIMEOUT_SECONDS: "${EXTRACTOR_CONNECT_TIMEOUT_SECONDS:-2}"
+    DOWNLOAD_TOKEN_TTL_SECONDS: "${DOWNLOAD_TOKEN_TTL_SECONDS:-600}"
+    DOWNLOAD_JOB_TTL_SECONDS: "${DOWNLOAD_JOB_TTL_SECONDS:-3600}"
+    DOWNLOAD_CONNECT_TIMEOUT_SECONDS: "${DOWNLOAD_CONNECT_TIMEOUT_SECONDS:-3}"
+    DOWNLOAD_TIMEOUT_SECONDS: "${DOWNLOAD_TIMEOUT_SECONDS:-120}"
+    DOWNLOAD_MAX_REDIRECTS: "${DOWNLOAD_MAX_REDIRECTS:-3}"
+    DOWNLOAD_MAX_FILE_BYTES: "${DOWNLOAD_MAX_FILE_BYTES:-536870912}"
+    DOWNLOAD_MAX_ZIP_ASSETS: "${DOWNLOAD_MAX_ZIP_ASSETS:-20}"
+    DOWNLOAD_MAX_ZIP_BYTES: "${DOWNLOAD_MAX_ZIP_BYTES:-1073741824}"
+    DOWNLOAD_JOB_TIMEOUT_SECONDS: "${DOWNLOAD_JOB_TIMEOUT_SECONDS:-900}"
     UMAMI_ENABLED: "${UMAMI_ENABLED:-false}"
     UMAMI_SCRIPT_URL: "${UMAMI_SCRIPT_URL:-}"
     UMAMI_WEBSITE_ID: "${UMAMI_WEBSITE_ID:-}"
@@ -132,7 +141,7 @@ services:
   worker:
     <<: *app-service
     container_name: media-downloader-worker
-    command: ["php", "artisan", "queue:work", "redis", "--sleep=3", "--tries=3", "--timeout=90", "--no-interaction"]
+    command: ["php", "artisan", "queue:work", "redis", "--sleep=3", "--tries=1", "--timeout=900", "--no-interaction"]
     stop_grace_period: 30s
 
   scheduler:

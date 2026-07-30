@@ -1,4 +1,5 @@
 import asyncio
+import html
 import socket
 from dataclasses import replace
 
@@ -21,6 +22,8 @@ ACTIVITY_URL = f"https://www.linkedin.com/feed/update/urn:li:activity:{ACTIVITY_
 IMAGE_ONE = "https://media.licdn.com/dms/image/one.jpg"
 IMAGE_TWO = "https://media.licdn.com/dms/image/two.jpg"
 VIDEO = "https://dms.licdn.com/playlist/video.mp4"
+VIDEO_720 = "https://dms.licdn.com/video/mp4-720p-30fp-crf28/source"
+VIDEO_640 = "https://dms.licdn.com/video/mp4-640p-30fp-crf28/source"
 
 
 def document(
@@ -74,12 +77,12 @@ def document(
         (
             f"https://m.linkedin.com/posts/example_activity-{ACTIVITY_ID}-sample"
             "?trk=public_post&lipi=ignored",
-            ACTIVITY_URL,
-            "activity",
+            f"https://www.linkedin.com/posts/example_activity-{ACTIVITY_ID}-sample/",
+            "post",
         ),
         (
-            "https://linkedin.com/posts/example-public-post?midToken=ignored",
-            "https://www.linkedin.com/posts/example-public-post/",
+            f"https://linkedin.com/posts/example_activity-{ACTIVITY_ID}-sample?midToken=ignored",
+            f"https://www.linkedin.com/posts/example_activity-{ACTIVITY_ID}-sample/",
             "post",
         ),
     ],
@@ -170,6 +173,101 @@ def test_json_ld_is_a_safe_metadata_fallback() -> None:
     assert metadata["published_at"] == "2026-07-28T13:30:00Z"
     assert media_type == "carousel"
     assert len(assets) == 2
+
+
+def test_public_video_wins_over_login_markers_and_maps_structured_metadata() -> None:
+    page = f"""
+    <html><head>
+      <script type="application/ld+json">{{
+        "@context": "https://schema.org",
+        "@type": "VideoObject",
+        "name": "Public native video",
+        "description": "A public LinkedIn video",
+        "contentUrl": "{VIDEO_640}",
+        "thumbnailUrl": "{IMAGE_ONE}",
+        "duration": "PT1M51S",
+        "width": 720,
+        "height": 1280,
+        "creator": {{"@type": "Organization", "name": "Example Organization"}},
+        "uploadDate": "2026-07-28T12:00:00Z"
+      }}</script>
+    </head><body>
+      <form id="join-form" action="/uas/login">Sign in</form>
+      <video
+        data-sources='[
+          {{"src":"{VIDEO_640}","type":"video/mp4","data-bitrate":750872}},
+          {{"src":"{VIDEO_720}","type":"video/mp4","data-bitrate":979082}}
+        ]'
+        data-poster-url="{IMAGE_ONE}"
+        data-captions-url="https://dms.licdn.com/captions/en.vtt"
+        data-digitalmedia-asset-urn="urn:li:digitalmediaAsset:D4D05AQFOGXP0m8vpfQ"
+      ></video>
+    </body></html>
+    """
+
+    metadata, assets, media_type = parse_linkedin_document(page, ACTIVITY_URL)
+
+    assert media_type == "video"
+    assert metadata["title"] == "Public native video"
+    assert metadata["author_name"] == "Example Organization"
+    assert metadata["duration_ms"] == 111_000
+    assert metadata["width"] == 720
+    assert metadata["height"] == 1280
+    assert metadata["orientation"] == "portrait"
+    assert metadata["thumbnail_url"] == IMAGE_ONE
+    assert metadata["captions_url"] == "https://dms.licdn.com/captions/en.vtt"
+    assert metadata["media_asset_id"] == "urn:li:digitalmediaAsset:D4D05AQFOGXP0m8vpfQ"
+    assert [item["quality_label"] for item in assets[0]["variants"]] == [
+        "720p MP4",
+        "640p MP4",
+    ]
+    assert [item["bitrate"] for item in assets[0]["variants"]] == [979082, 750872]
+    assert assets[0]["variants"][0]["is_preferred"] is True
+
+
+def test_graph_video_object_and_entity_encoded_sources_are_supported() -> None:
+    sources = html.escape(
+        f'[{{"src":"{VIDEO_720}","type":"video/mp4","data-bitrate":900000}}]',
+        quote=True,
+    )
+    page = f"""
+    <html><head><script type="application/ld+json">{{
+      "@context": "https://schema.org",
+      "@graph": [
+        {{"@type": "SocialMediaPosting", "headline": "Graph post"}},
+        {{"@type": "VideoObject", "contentUrl": "{VIDEO_720}",
+          "thumbnailUrl": "{IMAGE_ONE}", "duration": "PT8S"}}
+      ]
+    }}</script></head><body><video data-sources="{sources}"></video></body></html>
+    """
+
+    metadata, assets, media_type = parse_linkedin_document(page, ACTIVITY_URL)
+
+    assert media_type == "video"
+    assert metadata["duration_ms"] == 8_000
+    assert assets[0]["url"] == VIDEO_720
+    assert len(assets[0]["variants"]) == 1
+
+
+def test_malformed_sources_are_ignored_and_duplicate_variants_are_deduplicated() -> None:
+    page = f"""
+    <html><head>
+      <meta property="og:title" content="Public post">
+      <meta property="og:video" content="{VIDEO_720}">
+    </head><body>
+      <video data-sources="not-json"></video>
+      <video data-sources='[
+        {{"src":"{VIDEO_720}","type":"video/mp4","data-bitrate":1}},
+        {{"src":"https://dms.licdn.com.evil.example/video.mp4","type":"video/mp4"}}
+      ]'></video>
+    </body></html>
+    """
+
+    _, assets, media_type = parse_linkedin_document(page, ACTIVITY_URL)
+
+    assert media_type == "video"
+    assert len(assets[0]["variants"]) == 1
+    assert assets[0]["variants"][0]["url"] == VIDEO_720
 
 
 @pytest.mark.parametrize(
@@ -329,7 +427,7 @@ def test_non_html_metadata_response_is_rejected(
     assert exception.value.code == "parsing_failed"
 
 
-def test_adapter_returns_beta_ready_contract_without_binary_fetch() -> None:
+def test_adapter_returns_stable_ready_contract_without_binary_fetch() -> None:
     class FakeClient:
         async def fetch(self, normalized_url: str) -> str:
             assert normalized_url == ACTIVITY_URL
@@ -342,9 +440,9 @@ def test_adapter_returns_beta_ready_contract_without_binary_fetch() -> None:
         )
     )
     assert result.status == "ready"
-    assert result.maturity == "beta"
+    assert result.maturity == "stable"
     assert result.media_type == "carousel"
-    assert result.capabilities == ["metadata", "beta", "media_assets", "multiple_assets"]
+    assert result.capabilities == ["metadata", "media_assets", "multiple_assets"]
     assert len(result.warnings) == 2
 
 
@@ -361,4 +459,4 @@ def test_optional_live_public_linkedin_post() -> None:
 
     result = asyncio.run(LinkedInProviderAdapter().extract(classify_url(url), "live-linkedin"))
     assert result.status == "ready"
-    assert result.maturity == "beta"
+    assert result.maturity == "stable"

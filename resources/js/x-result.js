@@ -1,5 +1,6 @@
 const MEDIA_HOSTS = new Set(['pbs.twimg.com', 'video.twimg.com']);
 const IMAGE_HOSTS = new Set(['pbs.twimg.com', 'i.ytimg.com']);
+const LOCAL_MEDIA_PATH = /^\/api\/downloads\/[a-z0-9]{48}\.[a-f0-9]{64}$/;
 
 function safeUrl(value, hosts) {
     if (typeof value !== 'string') {
@@ -21,6 +22,9 @@ function safeUrl(value, hosts) {
 }
 
 export function safeResultImageUrl(value) {
+    if (typeof value === 'string' && LOCAL_MEDIA_PATH.test(value)) {
+        return value;
+    }
     if (safeUrl(value, IMAGE_HOSTS)) {
         return safeUrl(value, IMAGE_HOSTS);
     }
@@ -69,15 +73,17 @@ export function normalizeXAssets(value) {
             return [];
         }
 
-        const url = safeXMediaUrl(asset.url);
-        if (!url) {
+        const previewUrl = typeof asset.preview_url === 'string'
+            && LOCAL_MEDIA_PATH.test(asset.preview_url)
+            ? asset.preview_url
+            : null;
+        if (!previewUrl && asset.type === 'image') {
             return [];
         }
 
         const variants = Array.isArray(asset.variants)
             ? asset.variants.slice(0, 12).flatMap((variant) => {
-                const variantUrl = safeXMediaUrl(variant?.url);
-                if (!variantUrl || !['video/mp4', 'application/x-mpegURL'].includes(variant?.mime_type)) {
+                if (!['video/mp4', 'application/x-mpegURL'].includes(variant?.mime_type)) {
                     return [];
                 }
 
@@ -96,8 +102,8 @@ export function normalizeXAssets(value) {
             id: typeof asset.id === 'string' ? asset.id : `asset-${index + 1}`,
             order: Number.isInteger(asset.order) ? asset.order : index + 1,
             type: asset.type,
-            url,
-            thumbnailUrl: safeResultImageUrl(asset.thumbnail_url),
+            url: null,
+            thumbnailUrl: previewUrl,
             width: Number.isInteger(asset.width) ? asset.width : null,
             height: Number.isInteger(asset.height) ? asset.height : null,
             durationMs: Number.isInteger(asset.duration_ms) ? asset.duration_ms : null,

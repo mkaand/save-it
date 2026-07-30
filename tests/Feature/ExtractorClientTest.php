@@ -48,13 +48,14 @@ class ExtractorClientTest extends TestCase
             ->assertJsonPath('data.media_type', $mediaType)
             ->assertJsonPath('data.url', 'https://x.com/example/status/123')
             ->assertJsonCount(count($assets), 'data.assets')
-            ->assertJsonCount(count($assets), 'data.outputs');
+            ->assertJsonCount(count($assets) + (count($assets) > 1 ? 1 : 0), 'data.outputs');
 
         foreach ($response->json('data.outputs') as $output) {
-            $this->assertFalse($output['available']);
-            $this->assertArrayNotHasKey('download_url', $output);
+            $this->assertTrue($output['available']);
+            $this->assertContains($output['delivery'], ['proxy', 'job']);
         }
         $this->assertStringNotContainsString('extractor:8000', $response->getContent());
+        $this->assertStringNotContainsString('twimg.com', $response->getContent());
         $this->assertStringNotContainsString('traceback', strtolower($response->getContent()));
     }
 
@@ -295,11 +296,12 @@ class ExtractorClientTest extends TestCase
 
         $this->assertStringNotContainsString('extractor:8000', $response->getContent());
         foreach ($response->json('data.outputs') as $output) {
-            $this->assertFalse($output['available']);
+            $this->assertTrue($output['available']);
         }
+        $this->assertStringNotContainsString('cdninstagram.com', $response->getContent());
     }
 
-    public function test_linkedin_beta_extraction_maps_to_safe_public_response(): void
+    public function test_linkedin_extraction_maps_to_safe_public_response(): void
     {
         Http::fake(function (Request $request) {
             return Http::response(
@@ -312,14 +314,14 @@ class ExtractorClientTest extends TestCase
         ])->assertOk()
             ->assertJsonPath('data.platform', 'linkedin')
             ->assertJsonPath('data.platform_label', 'LinkedIn')
-            ->assertJsonPath('data.provider_maturity', 'beta')
+            ->assertJsonPath('data.provider_maturity', 'stable')
             ->assertJsonPath('data.media_type', 'carousel')
             ->assertJsonPath(
                 'data.url',
                 'https://www.linkedin.com/feed/update/urn:li:activity:1234567890123456789/',
             )
             ->assertJsonCount(2, 'data.assets')
-            ->assertJsonCount(2, 'data.outputs');
+            ->assertJsonCount(3, 'data.outputs');
 
         $this->assertSame(
             "Public availability depends on LinkedIn's current unauthenticated response.",
@@ -327,11 +329,32 @@ class ExtractorClientTest extends TestCase
         );
         $this->assertSame('Example Organization', $response->json('data.metadata.author_name'));
         $this->assertStringNotContainsString('extractor:8000', $response->getContent());
+        $this->assertStringNotContainsString('licdn.com', $response->getContent());
 
         foreach ($response->json('data.outputs') as $output) {
-            $this->assertFalse($output['available']);
-            $this->assertArrayNotHasKey('download_url', $output);
+            $this->assertTrue($output['available']);
+            $this->assertContains($output['delivery'], ['proxy', 'job']);
         }
+    }
+
+    public function test_linkedin_extraction_accepts_a_long_percent_encoded_canonical_post_url(): void
+    {
+        $canonicalUrl = 'https://www.linkedin.com/posts/istanbul-sensorler_panasonicindustry-hgt1010-%C3%B6l%C3%A7%C3%BCmsens%C3%B6r%C3%BC-activity-7487771630123769856-Te6v/';
+
+        Http::fake(function (Request $request) use ($canonicalUrl) {
+            $payload = $this->linkedinSuccessResponse($request->data()['request_id']);
+            $payload['data']['provider_variant'] = 'post';
+            $payload['data']['normalized_url'] = $canonicalUrl;
+
+            return Http::response($payload);
+        });
+
+        $this->postJson('/api/analyze', [
+            'url' => $canonicalUrl,
+        ])->assertOk()
+            ->assertJsonPath('data.platform', 'linkedin')
+            ->assertJsonPath('data.provider_maturity', 'stable')
+            ->assertJsonPath('data.url', $canonicalUrl);
     }
 
     public function test_linkedin_text_only_post_is_ready_without_media_assets(): void
@@ -342,7 +365,7 @@ class ExtractorClientTest extends TestCase
             $payload['data']['metadata']['media_count'] = 0;
             $payload['data']['metadata']['thumbnail_url'] = null;
             $payload['data']['assets'] = [];
-            $payload['data']['capabilities'] = ['metadata', 'beta'];
+            $payload['data']['capabilities'] = ['metadata'];
 
             return Http::response($payload);
         });
@@ -431,11 +454,11 @@ class ExtractorClientTest extends TestCase
             ->assertJsonPath('data.video_formats.0.requires_merge', true)
             ->assertJsonPath('data.audio_formats.0.container', 'm4a')
             ->assertJsonPath('data.conversion_plans.0.requires_ffmpeg', true)
-            ->assertJsonPath('data.conversion_plans.0.available', false);
+            ->assertJsonPath('data.conversion_plans.0.available', true);
 
         foreach ($response->json('data.outputs') as $output) {
-            $this->assertFalse($output['available']);
-            $this->assertArrayNotHasKey('download_url', $output);
+            $this->assertTrue($output['available']);
+            $this->assertContains($output['delivery'], ['proxy', 'job']);
         }
         $this->assertStringNotContainsString('extractor:8000', $response->getContent());
     }
@@ -621,10 +644,10 @@ class ExtractorClientTest extends TestCase
                 'source_url' => 'https://linkedin.com/posts/example-activity-1234567890123456789-abcd?trk=share',
                 'normalized_url' => 'https://www.linkedin.com/feed/update/urn:li:activity:1234567890123456789/',
                 'status' => 'ready',
-                'provider_maturity' => 'beta',
+                'provider_maturity' => 'stable',
                 'warnings' => [
                     "Public availability depends on LinkedIn's current unauthenticated response.",
-                    'Some posts may require signing in and cannot be analyzed.',
+                    'Posts that require signing in cannot be analyzed.',
                 ],
                 'metadata' => [
                     'post_id' => '1234567890123456789',
@@ -634,10 +657,11 @@ class ExtractorClientTest extends TestCase
                     'author_handle' => null,
                     'published_at' => '2026-07-29T12:00:00Z',
                     'thumbnail_url' => $assets[0]['thumbnail_url'],
+                    'captions_url' => 'https://dms.licdn.com/captions/private-token',
                     'media_count' => count($assets),
                 ],
                 'assets' => $assets,
-                'capabilities' => ['metadata', 'media_assets', 'multiple_assets', 'beta'],
+                'capabilities' => ['metadata', 'media_assets', 'multiple_assets'],
             ],
         ];
     }

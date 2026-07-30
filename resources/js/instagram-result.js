@@ -1,4 +1,5 @@
 const INSTAGRAM_ASSET_SUFFIX = '.cdninstagram.com';
+const LOCAL_MEDIA_PATH = /^\/api\/downloads\/[a-z0-9]{48}\.[a-f0-9]{64}$/;
 
 export function safeInstagramMediaUrl(value) {
     if (typeof value !== 'string') {
@@ -30,15 +31,17 @@ export function normalizeInstagramAssets(value) {
             return [];
         }
 
-        const url = safeInstagramMediaUrl(asset.url);
-        if (!url) {
+        const previewUrl = typeof asset.preview_url === 'string'
+            && LOCAL_MEDIA_PATH.test(asset.preview_url)
+            ? asset.preview_url
+            : null;
+        if (!previewUrl && asset.type === 'image') {
             return [];
         }
 
         const variants = Array.isArray(asset.variants)
             ? asset.variants.slice(0, 12).flatMap((variant) => {
-                const variantUrl = safeInstagramMediaUrl(variant?.url);
-                if (!variantUrl || variant?.mime_type !== 'video/mp4') {
+                if (variant?.mime_type !== 'video/mp4') {
                     return [];
                 }
                 return [{
@@ -55,8 +58,8 @@ export function normalizeInstagramAssets(value) {
             id: typeof asset.id === 'string' ? asset.id : `asset-${index + 1}`,
             order: Number.isInteger(asset.order) ? asset.order : index + 1,
             type: asset.type,
-            url,
-            thumbnailUrl: safeInstagramMediaUrl(asset.thumbnail_url),
+            url: null,
+            thumbnailUrl: previewUrl,
             width: Number.isInteger(asset.width) ? asset.width : null,
             height: Number.isInteger(asset.height) ? asset.height : null,
             durationMs: Number.isInteger(asset.duration_ms) ? asset.duration_ms : null,

@@ -8,6 +8,7 @@ import {
 } from '../../resources/js/instagram-result.js';
 
 const imageUrl = 'https://scontent-lhr8-1.cdninstagram.com/v/image.jpg?token=temporary';
+const previewUrl = `/api/downloads/${'c'.repeat(48)}.${'d'.repeat(64)}`;
 
 test('normalizes Instagram image and reel metadata without persistence payloads', () => {
     const assets = normalizeInstagramAssets([
@@ -16,7 +17,7 @@ test('normalizes Instagram image and reel metadata without persistence payloads'
             order: 1,
             type: 'image',
             url: imageUrl,
-            thumbnail_url: imageUrl,
+            preview_url: previewUrl,
             width: 1080,
             height: 1350,
             variants: [],
@@ -26,7 +27,7 @@ test('normalizes Instagram image and reel metadata without persistence payloads'
             order: 2,
             type: 'video',
             url: 'https://scontent-lhr8-1.cdninstagram.com/o1/video.mp4',
-            thumbnail_url: imageUrl,
+            preview_url: previewUrl,
             width: 1080,
             height: 1920,
             variants: [{
@@ -42,6 +43,8 @@ test('normalizes Instagram image and reel metadata without persistence payloads'
     assert.equal(instagramAssetLabel(assets[0]), 'Image · 1080×1350');
     assert.equal(instagramAssetLabel(assets[1]), 'Reel / video · 1080×1920');
     assert.equal('downloadUrl' in assets[1], false);
+    assert.equal(assets[0].thumbnailUrl, previewUrl);
+    assert.equal(assets[1].url, null);
 });
 
 test('rejects attacker suffixes, custom ports, and non-HTTPS URLs', () => {
@@ -62,8 +65,14 @@ test('rejects attacker suffixes, custom ports, and non-HTTPS URLs', () => {
 
 test('corrupt asset data is dropped without throwing', () => {
     assert.deepEqual(normalizeInstagramAssets(null), []);
+    const [sanitizedVideo] = normalizeInstagramAssets([{
+        type: 'video',
+        url: 'javascript:alert(1)',
+    }]);
+    assert.equal(sanitizedVideo.url, null);
+    assert.equal(sanitizedVideo.thumbnailUrl, null);
     assert.deepEqual(
-        normalizeInstagramAssets([{ type: 'video', url: 'javascript:alert(1)' }]),
+        normalizeInstagramAssets([{ type: 'image', thumbnail_url: imageUrl }]),
         [],
     );
 });
