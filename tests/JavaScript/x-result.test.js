@@ -8,13 +8,15 @@ import {
     xAssetLabel,
 } from '../../resources/js/x-result.js';
 
+const previewUrl = `/api/downloads/${'a'.repeat(48)}.${'b'.repeat(64)}`;
+
 function video(overrides = {}) {
     return {
         id: 'asset-1',
         order: 1,
         type: 'video',
         url: 'https://video.twimg.com/path/1280x720/video.mp4?tag=1',
-        thumbnail_url: 'https://pbs.twimg.com/media/poster.jpg',
+        preview_url: previewUrl,
         width: 1280,
         height: 720,
         variants: [{
@@ -35,6 +37,9 @@ test('normalizes X video metadata without retaining download URLs in storage dat
     assert.equal(assets[0].type, 'video');
     assert.equal(assets[0].variants[0].qualityLabel, '1280×720');
     assert.equal(xAssetLabel(assets[0]), 'Video · 1280×720');
+    assert.equal(assets[0].url, null);
+    assert.equal(assets[0].thumbnailUrl, previewUrl);
+    assert.equal('url' in assets[0].variants[0], false);
 });
 
 test('supports image carousel and mixed media ordering', () => {
@@ -45,7 +50,7 @@ test('supports image carousel and mixed media ordering', () => {
             order: 2,
             type: 'image',
             url: 'https://pbs.twimg.com/media/image.jpg?name=orig',
-            thumbnail_url: 'https://pbs.twimg.com/media/image.jpg',
+            preview_url: previewUrl,
             width: 1200,
             height: 800,
             variants: [],
@@ -73,5 +78,14 @@ test('rejects attacker suffixes, custom ports, and non-HTTPS media URLs', () => 
 
 test('drops malformed and unsupported assets without throwing', () => {
     assert.deepEqual(normalizeXAssets(null), []);
-    assert.deepEqual(normalizeXAssets([{ type: 'video', url: 'javascript:alert(1)' }]), []);
+    const [sanitizedVideo] = normalizeXAssets([{
+        type: 'video',
+        url: 'javascript:alert(1)',
+    }]);
+    assert.equal(sanitizedVideo.url, null);
+    assert.equal(sanitizedVideo.thumbnailUrl, null);
+    assert.deepEqual(normalizeXAssets([{
+        type: 'image',
+        thumbnail_url: 'https://pbs.twimg.com/image.jpg',
+    }]), []);
 });

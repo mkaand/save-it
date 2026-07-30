@@ -2,10 +2,10 @@
 
 Save It is a privacy-conscious media URL analysis experience built with Laravel 12 and PHP 8.2. The public application runs at `https://save.allmy.win`.
 
-PR #8 adds best-effort anonymous metadata analysis for public LinkedIn posts through
-the internal extractor. LinkedIn availability depends on the public HTML returned to
-unauthenticated clients. Media file delivery and authenticated access are not
-implemented.
+PR #9 adds production LinkedIn public-media parsing, short-lived signed download
+references, Range-aware proxy streaming, queue-backed YouTube merge and audio
+conversion, and multi-asset ZIP preparation. Authenticated/private media remains out
+of scope.
 
 ## Current capabilities
 
@@ -20,7 +20,7 @@ implemented.
 - Stateless JSON health endpoint
 - Docker services for PHP-FPM, Nginx, Redis, the queue worker, and scheduler
 - Internal Python 3.12 extractor service with FastAPI, Pydantic, and versioned API v1
-- Exact-host provider registry with X, Instagram, YouTube, and LinkedIn Beta adapters and controlled stubs for other providers
+- Exact-host provider registry with X, Instagram, YouTube, and LinkedIn adapters and controlled stubs for other providers
 - X public post metadata, ordered assets, and source video variants
 - Instagram public post/reel metadata and ordered image/video carousel assets
 - Open Graph, Twitter Card, robots, sitemap, manifest, and local social-preview assets
@@ -32,10 +32,10 @@ implemented.
 
 Platform labels describe the current implementation:
 
-- X: public media extraction available; download delivery remains planned
-- Instagram: public post and reel extraction available; download delivery remains planned
-- YouTube and YouTube Shorts: public metadata and format analysis available; download delivery remains planned
-- LinkedIn: public post metadata analysis in Beta; availability may vary and download delivery remains planned
+- X: public media extraction and individual/ZIP delivery available
+- Instagram: public post/reel extraction and individual/ZIP delivery available
+- YouTube and YouTube Shorts: direct formats, MP4 merge, M4A, MP3, and thumbnails available
+- LinkedIn: public post analysis and progressive public-media delivery available
 - TikTok and Facebook: URL recognition; extraction is planned
 
 ## Analyze endpoint
@@ -54,10 +54,10 @@ The endpoint delegates authoritative provider recognition to the internal extrac
 - accepts only HTTP and HTTPS URLs;
 - uses exact hostname matching to prevent suffix attacks;
 - rejects embedded credentials, custom ports, localhost, and IP address URLs;
-- does not fetch arbitrary submitted URLs, run shell commands, create jobs, or store history;
+- does not fetch arbitrary submitted URLs or store server-side analysis history;
 - permits X, Instagram, and LinkedIn adapters to fetch canonical, service-constructed metadata URLs;
 - submits only strictly canonical YouTube video URLs to the pinned yt-dlp library API;
-- returns real X, Instagram, YouTube, and best-effort LinkedIn metadata or normalized previews for stubs, with download controls unavailable;
+- returns real X, Instagram, YouTube, and LinkedIn metadata, short-lived Save It delivery references, or normalized previews for stubs;
 - is limited to 30 requests per minute per client IP.
 
 Laravel calls `POST http://extractor:8000/v1/extract` with explicit connect and total
@@ -93,7 +93,7 @@ The X adapter accepts only canonical status paths, fetches bounded structured
 metadata from `cdn.syndication.twimg.com`, and emits allowlisted
 `pbs.twimg.com`/`video.twimg.com` asset references. The Instagram adapter accepts only
 post and reel paths, fetches bounded public embed metadata from `www.instagram.com`,
-and emits allowlisted `*.cdninstagram.com` asset references. The LinkedIn Beta
+and emits allowlisted `*.cdninstagram.com` asset references. The LinkedIn
 adapter accepts only public post and activity URLs, reads bounded public structured
 HTML metadata, and emits only allowlisted `*.licdn.com` asset references. TikTok and
 Facebook remain `not_implemented` stubs. The YouTube adapter accepts only canonical
@@ -113,13 +113,30 @@ EXTRACTOR_API_VERSION=1
 EXTRACTOR_REQUEST_TIMEOUT_SECONDS=12
 ```
 
+Laravel delivery settings are non-secret limits; signing continues to use the
+existing untracked `APP_KEY`:
+
+```dotenv
+DOWNLOAD_TOKEN_TTL_SECONDS=600
+DOWNLOAD_JOB_TTL_SECONDS=3600
+DOWNLOAD_CONNECT_TIMEOUT_SECONDS=3
+DOWNLOAD_TIMEOUT_SECONDS=120
+DOWNLOAD_MAX_REDIRECTS=3
+DOWNLOAD_MAX_FILE_BYTES=536870912
+DOWNLOAD_MAX_ZIP_ASSETS=20
+DOWNLOAD_MAX_ZIP_BYTES=1073741824
+DOWNLOAD_JOB_TIMEOUT_SECONDS=900
+```
+
 Structured logs include correlation and timing fields but omit full URLs, query
 strings, headers, cookies, and bodies. Provider clients use verified TLS, ignore proxy
 environment variables, validate DNS results and each redirect target, limit
-redirects and decompressed response size, and do not fetch media binaries. The
+redirects and decompressed response size. The
 YouTube client disables playlists, cookies, downloads, subtitles, remote components,
 and environment proxies. It returns safe format identifiers rather than direct media
-URLs. The service contains no shell invocation, FFmpeg, or download path.
+URLs. A separate internal YouTube format-resolution endpoint resolves a previously
+validated canonical video plus format identifier at delivery time. It does not accept
+arbitrary provider URLs, cookies, credentials, or command-line flags.
 
 Run Python checks in an isolated Python 3.12 environment:
 
@@ -148,24 +165,24 @@ fixtures and mock transports. No credentials, cookies, or private content are
 required. PR #10 still owns centralized egress, DNS-rebinding, and redirect-chain
 hardening beyond provider-specific baselines.
 
-## LinkedIn Beta analysis
+## LinkedIn public media analysis
 
-LinkedIn Beta accepts public `/posts/...` URLs and
+LinkedIn accepts public `/posts/...` URLs and
 `/feed/update/urn:li:activity:<id>/` URLs on the standard, `www`, and mobile hosts.
-Tracking parameters and fragments are removed. Post slugs containing a stable
-activity identifier normalize to the canonical activity URL. Profiles, company
+Tracking parameters and fragments are removed. Post URLs keep a meaningful canonical
+post URL while activity URLs retain their activity form. Profiles, company
 pages, jobs, articles, newsletters, general feeds, authentication pages, and
 `lnkd.in` short links are rejected. Short-link redirects are intentionally not
 resolved in this PR.
 
 The adapter requests only the canonical LinkedIn page without credentials or
 persistent cookies. It prefers Open Graph and Twitter Card metadata, then JSON-LD,
-and returns only fields actually exposed publicly. Public images, native-video
-previews, multi-image metadata, and text-only post metadata are supported on a
-best-effort basis. Login walls, private or unavailable posts, anonymous access
-blocks, rate limits, timeouts, and changed response shapes produce controlled errors.
-No login bypass, browser automation, binary media fetch, or download delivery is
-implemented.
+and returns only fields actually exposed publicly. Root and `@graph` `VideoObject`
+metadata and validated `<video data-sources>` progressive MP4 variants are supported,
+including deterministic resolution/bitrate ordering. Login components do not
+override valid public post metadata; real authwall redirects and pages remain
+controlled failures. No login bypass, browser automation, account cookie, or
+third-party downloader service is used.
 
 ## YouTube analysis
 
@@ -179,8 +196,37 @@ age-restricted, and DRM-protected content is rejected with a safe error. Video
 formats are ordered as MP4/H.264, MP4/H.265, other MP4, then WebM alternatives.
 Audio-only M4A options precede WebM alternatives. Each format may include codec,
 resolution, FPS, bitrate, estimated size, and whether a separate audio stream must be
-merged. MP3 is a disabled plan that explicitly requires FFmpeg in PR #9; it is not a
-direct media URL.
+merged. Direct formats and M4A stream through short-lived delivery references.
+Separate MP4 video/audio streams are prepared with FFmpeg stream copy. MP3 is
+converted at 128, 192, 256, or 320 kbps without exposing the upstream source URL.
+
+## Download delivery
+
+Analyze results never accept an upstream URL back from the browser. Laravel stores a
+versioned download plan in Redis and returns an opaque random identifier plus an
+HMAC signature. Tokens expire after ten minutes by default and are revalidated
+against provider-specific HTTPS host policy before each request.
+
+`GET /api/downloads/{token}` streams direct media in 64 KiB chunks, forwards one
+valid byte range, preserves `206`, `Content-Range`, `Accept-Ranges`, and `416`
+semantics, bounds content size, disables buffering, sanitizes filenames, and closes
+the upstream stream on disconnect. It forwards no cookies or Authorization headers.
+
+`POST /api/download-jobs` atomically consumes one issued job token. Redis-backed workers use
+unique private directories for:
+
+- MP4 video plus M4A audio stream-copy merge;
+- MP3 conversion at 128/192/256/320 kbps;
+- fail-closed multi-asset ZIP creation with bounded asset count and aggregate size.
+
+`GET /api/download-jobs/{id}` returns bounded `queued`, `processing`, `ready`, or
+`failed` progress. Prepared files are served through another short-lived token and
+deleted after delivery; the scheduler removes stale job directories. FFmpeg is
+started with an argument array through `proc_open`, never a shell string, accepts
+no user-provided flags, and is limited to two threads and a bounded output size.
+
+See [Download delivery](docs/download-delivery.md) for token, Range, job, ZIP,
+cleanup, and PR #10 boundary details.
 
 ## Recent Fetches
 
@@ -208,10 +254,8 @@ Invalid or unavailable browser storage safely falls back to system mode. Theme s
 
 ## Current limitations
 
-The following are intentionally not implemented in PR #8:
+The following remain intentionally out of scope after PR #9:
 
-- FFmpeg, download, or conversion engines
-- functional media download links
 - playlists and livestreams
 - queue-backed analysis jobs
 - server-side Recent Fetches persistence
@@ -220,11 +264,8 @@ The following are intentionally not implemented in PR #8:
 - authenticated, private, authwall-protected, or short-link LinkedIn analysis
 - Instagram Stories, Live, private, or login-required extraction
 - X private/protected posts or authenticated extraction
-- media file delivery, URL proxying, or expired asset URL renewal
 - centralized PR #10 egress and DNS-rebinding controls
-
-YouTube format identifiers and metadata are real analysis results, but all delivery
-controls remain disabled until PR #9.
+- authenticated/private provider content and automatic renewal of expired upstream assets
 
 ## Technology and services
 

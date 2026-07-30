@@ -174,3 +174,15 @@ test('stores YouTube history without format or conversion payloads', () => {
     assert.equal(stored.items[0].audio_formats, undefined);
     assert.equal(stored.items[0].conversion_plans, undefined);
 });
+
+test('does not persist opaque Save It download tokens as thumbnails', () => {
+    const storage = new MemoryStorage();
+    addRecentFetch(storage, {
+        ...item(1),
+        thumbnailUrl: `/api/downloads/${'a'.repeat(48)}.${'b'.repeat(64)}`,
+    });
+
+    const stored = JSON.parse(storage.getItem(RECENT_FETCHES_KEY));
+    assert.equal(stored.items[0].thumbnailUrl, null);
+    assert.equal(JSON.stringify(stored).includes('/api/downloads/'), false);
+});

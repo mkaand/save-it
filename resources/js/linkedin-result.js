@@ -1,4 +1,5 @@
 const LINKEDIN_ASSET_SUFFIX = '.licdn.com';
+const LOCAL_MEDIA_PATH = /^\/api\/downloads\/[a-z0-9]{48}\.[a-f0-9]{64}$/;
 
 export function safeLinkedInMediaUrl(value) {
     if (typeof value !== 'string') {
@@ -30,8 +31,11 @@ export function normalizeLinkedInAssets(value) {
             return [];
         }
 
-        const url = safeLinkedInMediaUrl(asset.url);
-        if (!url) {
+        const previewUrl = typeof asset.preview_url === 'string'
+            && LOCAL_MEDIA_PATH.test(asset.preview_url)
+            ? asset.preview_url
+            : null;
+        if (!previewUrl && asset.type === 'image') {
             return [];
         }
 
@@ -39,12 +43,26 @@ export function normalizeLinkedInAssets(value) {
             id: typeof asset.id === 'string' ? asset.id : `asset-${index + 1}`,
             order: Number.isInteger(asset.order) ? asset.order : index + 1,
             type: asset.type,
-            url,
-            thumbnailUrl: safeLinkedInMediaUrl(asset.thumbnail_url),
+            url: null,
+            thumbnailUrl: previewUrl,
             width: Number.isInteger(asset.width) ? asset.width : null,
             height: Number.isInteger(asset.height) ? asset.height : null,
             durationMs: Number.isInteger(asset.duration_ms) ? asset.duration_ms : null,
-            variants: [],
+            variants: Array.isArray(asset.variants)
+                ? asset.variants.slice(0, 12).flatMap((variant) => {
+                    if (variant?.mime_type !== 'video/mp4') {
+                        return [];
+                    }
+                    return [{
+                        url: null,
+                        qualityLabel: typeof variant.quality_label === 'string'
+                            ? variant.quality_label.slice(0, 40)
+                            : null,
+                        bitrate: Number.isInteger(variant.bitrate) ? variant.bitrate : null,
+                        preferred: variant.is_preferred === true,
+                    }];
+                })
+                : [],
         }];
     });
 }

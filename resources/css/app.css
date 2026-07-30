@@ -1011,6 +1011,16 @@ summary:focus-visible {
     opacity: 0.62;
 }
 
+.output-option.is-available {
+    border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
+    cursor: pointer;
+}
+
+.output-option.is-available:hover {
+    border-color: var(--accent);
+    background: var(--surface-strong);
+}
+
 .output-option strong,
 .output-option span {
     display: block;

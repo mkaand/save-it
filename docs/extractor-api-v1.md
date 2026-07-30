@@ -55,6 +55,16 @@ Rules:
 - `request_id` is optional, 1–64 characters, and restricted to letters, numbers,
   `.`, `_`, `:`, and `-`.
 - `metadata_only` must be `true`; download and conversion options are not accepted.
+
+### `POST /v1/youtube/resolve`
+
+This internal-only endpoint resolves one format at delivery time. It accepts a
+canonical validated YouTube video/Shorts URL, one validated `format_id`, and an
+optional request ID. It rejects unknown fields and arbitrary providers. A successful
+response contains an HTTPS `*.googlevideo.com` source, MIME type, and optional
+estimated size. Laravel revalidates this source and never passes it through to the
+browser. Cookies, credentials, playlist selection, and user-provided yt-dlp options
+are not accepted.
 - Unknown JSON fields are rejected.
 
 The service does not trust a client-provided provider name. Provider and subtype are
@@ -130,8 +140,9 @@ Video format entries use a validated `format_id`, container, real reported codec
 codec family, nullable resolution/FPS/bitrate/estimated size, and booleans indicating
 whether audio is present and a future merge is required. They are ordered as
 MP4/H.264, MP4/H.265, other MP4, then WebM. Audio-only M4A entries precede WebM
-alternatives. MKV is omitted. MP3 is a conversion plan only and requires FFmpeg in
-PR #9; it is never presented as an extracted media URL.
+alternatives. MKV is omitted. MP3 remains a conversion plan in the extraction
+contract; Laravel implements it through a bounded FFmpeg preparation job and never
+presents an extracted source URL to the browser.
 
 Missing optional author, duration, size, bitrate, dimensions, or thumbnail values
 remain null or empty. Private, authentication-required, age-restricted,
@@ -227,14 +238,15 @@ uses MP4 transport. No GIF file is invented.
 
 Quoted-post media is not merged into the submitted post. A valid post without
 directly attached media returns `422 no_media`. Asset references can expire and are
-not download links; delivery remains PR #9 scope.
+not public download links. Laravel replaces them with expiring Save It delivery
+references.
 
-## LinkedIn Beta ready response
+## LinkedIn ready response
 
 Public LinkedIn `/posts/...` and `/feed/update/urn:li:activity:<id>/` URLs can
-produce a ready Beta response when reliable unauthenticated metadata is available.
-Tracking parameters are removed, and post slugs containing an activity identifier
-normalize to the canonical activity URL.
+produce a ready response when reliable unauthenticated metadata is available.
+Tracking parameters are removed. Public post URLs retain their meaningful canonical
+post path; activity URLs retain the activity form.
 
 ```json
 {
@@ -243,7 +255,7 @@ normalize to the canonical activity URL.
     "provider": "linkedin",
     "provider_label": "LinkedIn",
     "provider_variant": "activity",
-    "provider_maturity": "beta",
+    "provider_maturity": "stable",
     "media_type": "image",
     "normalized_url": "https://www.linkedin.com/feed/update/urn:li:activity:1234567890123456789/",
     "status": "ready",
@@ -273,7 +285,7 @@ normalize to the canonical activity URL.
         "variants": []
       }
     ],
-    "capabilities": ["metadata", "beta"],
+    "capabilities": ["metadata", "media_assets", "video_variants"],
     "warnings": [
       "Public availability depends on LinkedIn's current unauthenticated response."
     ]
@@ -281,8 +293,11 @@ normalize to the canonical activity URL.
 }
 ```
 
-`media_type` can be `image`, `video`, `carousel`, or `text`. Missing fields remain
-null rather than being inferred. Asset URLs must use verified HTTPS on a
+`media_type` can be `image`, `video`, `carousel`, or `text`. Root or `@graph`
+`VideoObject` values and validated, entity-decoded `video[data-sources]` entries can
+provide duration, dimensions, organization creator, thumbnail, captions metadata,
+asset URN, and ordered progressive MP4 variants. Missing fields remain null rather
+than being inferred. Asset URLs must use verified HTTPS on a
 `*.licdn.com` host and are metadata references, not download links. Profiles,
 company pages, jobs, articles, general feeds, authentication pages, and short links
 are rejected. Login walls and access restrictions return controlled errors.
@@ -418,7 +433,7 @@ revalidated, DNS answers must be globally routable, redirects are capped at thre
 the connect timeout is three seconds, the provider deadline is twelve seconds, and
 decompressed metadata is capped at 3 MiB. Media asset bodies are never requested.
 
-There is no extraction cache in PR #5. This avoids retaining expiring media URLs and
+There is no provider extraction cache. This avoids retaining expiring media URLs and
 keeps invalidation explicit. Full URLs, queries, bodies, headers, cookies, and
 upstream payloads are not logged.
 
@@ -444,7 +459,7 @@ explicit. No shell command or arbitrary CLI argument is built, and format direct
 URLs are omitted from the contract. Comprehensive shared egress policy remains PR
 #10 scope.
 
-The LinkedIn Beta adapter requests only canonical HTTPS post/activity URLs on
+The LinkedIn adapter requests only canonical HTTPS post/activity URLs on
 `linkedin.com`, `www.linkedin.com`, or `m.linkedin.com`. Redirect hosts are
 revalidated, DNS answers must be globally routable, redirects are capped at two,
 connect/read timeouts are three/eight seconds, and decompressed HTML is capped at
