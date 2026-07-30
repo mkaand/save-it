@@ -364,7 +364,22 @@ Do not run `docker compose down` for a routine deployment. After deployment, val
 ```bash
 ./scripts/validate-assets.sh http://127.0.0.1:8099
 ./scripts/validate-assets.sh https://save.allmy.win
+./scripts/validate-production-runtime.sh \
+  /opt/media-downloader \
+  http://127.0.0.1:8099 \
+  https://save.allmy.win
 ```
+
+The production validator requires five consecutive successful local and public
+landing-page requests, safe health responses, writable Laravel logs, valid assets,
+matching manifests, and persistent mount sources outside `/tmp`. Test app images
+against empty storage/database mounts with
+`./scripts/validate-runtime-init.sh media-downloader-app:local`.
+
+Rollback checkouts and runtime mounts must use a persistent `/opt/...` directory.
+Never leave app, worker, or scheduler attached to a source below `/tmp`. See the
+[deployment and rollback runbook](docs/deployment-runbook.md) for the backup,
+checksum, runtime initialization, controlled recreation, and acceptance process.
 
 The production PHP configuration disables displayed errors and startup errors, logs all PHP errors to container stderr, disables HTML error output, and keeps `expose_php` off.
 
@@ -385,6 +400,9 @@ docker run --rm -v "$PWD/extractor:/work" -w /work python:3.12.12-slim-bookworm 
 docker compose config
 docker compose build extractor app nginx
 bash -n scripts/validate-assets.sh
+bash -n scripts/validate-runtime-init.sh
+bash -n scripts/validate-production-runtime.sh
+./scripts/validate-runtime-init.sh media-downloader-app:local
 ```
 
 Runtime checks:
