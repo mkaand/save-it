@@ -54,6 +54,7 @@ COPY . .
 COPY --from=frontend /app/public ./public
 COPY docker/php/php.ini /usr/local/etc/php/conf.d/99-media-downloader.ini
 COPY docker/php/entrypoint.sh /usr/local/bin/media-downloader-entrypoint
+COPY docker/php/runtime-init.sh /usr/local/bin/media-downloader-runtime-init
 
 RUN rm -f bootstrap/cache/*.php \
     && composer dump-autoload \
@@ -61,14 +62,21 @@ RUN rm -f bootstrap/cache/*.php \
         --no-interaction \
         --optimize \
     && chmod -R a+rX app bootstrap config public resources routes \
-    && chmod 0755 /usr/local/bin/media-downloader-entrypoint artisan \
+    && chmod 0755 \
+        /usr/local/bin/media-downloader-entrypoint \
+        /usr/local/bin/media-downloader-runtime-init \
+        artisan \
     && mkdir -p \
         bootstrap/cache \
         database \
+        storage/app \
         storage/app/private \
         storage/app/public \
+        storage/framework \
+        storage/framework/cache \
         storage/framework/cache/data \
         storage/framework/sessions \
+        storage/framework/testing \
         storage/framework/views \
         storage/logs \
     && chown -R www-data:www-data bootstrap/cache database storage
