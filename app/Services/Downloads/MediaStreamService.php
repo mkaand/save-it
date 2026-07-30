@@ -61,7 +61,23 @@ final class MediaStreamService
         }
 
         $length = $this->positiveHeader($response, 'Content-Length');
-        $total = $this->contentRangeTotal($response);
+        $contentRange = $this->contentRange($response);
+        if (
+            $response->status() === 206
+            && (
+                $rangeHeader === null
+                || $contentRange === null
+                || $length === null
+                || $length !== ($contentRange['end'] - $contentRange['start'] + 1)
+            )
+        ) {
+            throw new DownloadException(
+                'invalid_upstream_range',
+                502,
+                'The media source returned an invalid byte range response.',
+            );
+        }
+        $total = $contentRange['total'] ?? null;
         $expected = is_int($asset['expected_size'] ?? null) ? $asset['expected_size'] : null;
         $limit = max(1, (int) config('services.downloads.max_file_bytes'));
         if (
@@ -91,11 +107,17 @@ final class MediaStreamService
             'X-Content-Type-Options' => 'nosniff',
             'X-Accel-Buffering' => 'no',
         ];
-        foreach (['Content-Length', 'Content-Range', 'Accept-Ranges'] as $header) {
-            $value = $response->header($header);
-            if (is_string($value) && $value !== '') {
-                $headers[$header] = $value;
-            }
+        if ($length !== null) {
+            $headers['Content-Length'] = (string) $length;
+        }
+        if ($response->status() === 206 && $contentRange !== null) {
+            $headers['Content-Range'] = sprintf(
+                'bytes %d-%d/%d',
+                $contentRange['start'],
+                $contentRange['end'],
+                $contentRange['total'],
+            );
+            $headers['Accept-Ranges'] = 'bytes';
         }
 
         $body = $response->toPsrResponse()->getBody();
@@ -207,14 +229,25 @@ final class MediaStreamService
         return is_string($value) && ctype_digit($value) ? (int) $value : null;
     }
 
-    private function contentRangeTotal(Response $response): ?int
+    /** @return array{start: int, end: int, total: int}|null */
+    private function contentRange(Response $response): ?array
     {
         $value = $response->header('Content-Range');
-        if (! is_string($value) || preg_match('/^bytes [0-9]+-[0-9]+\/([0-9]+)$/', $value, $matches) !== 1) {
+        if (
+            ! is_string($value)
+            || preg_match('/^bytes ([0-9]+)-([0-9]+)\/([0-9]+)$/', $value, $matches) !== 1
+        ) {
             return null;
         }
 
-        return (int) $matches[1];
+        $start = (int) $matches[1];
+        $end = (int) $matches[2];
+        $total = (int) $matches[3];
+        if ($start > $end || $end >= $total || $total < 1) {
+            return null;
+        }
+
+        return compact('start', 'end', 'total');
     }
 
     private function filename(string $value): string
