@@ -186,10 +186,14 @@ final class MediaUrlAnalyzer
             $resolution = is_string($format['resolution'] ?? null)
                 ? $format['resolution']
                 : 'Video';
-            $codec = strtoupper((string) ($format['video_codec_family'] ?? 'other'));
+            $codec = match ($format['video_codec_family'] ?? 'other') {
+                'h264' => 'H.264',
+                'h265' => 'H.265',
+                default => 'Compatible video',
+            };
             $merge = ($format['requires_merge'] ?? false)
-                ? ' · separate audio required'
-                : ' · includes audio';
+                ? ' · video and audio will be merged'
+                : (($format['has_audio'] ?? false) ? ' · audio included' : ' · video only');
             $mode = ($format['requires_merge'] ?? false) ? 'youtube_merge' : 'youtube_direct';
             $payload = [
                 'version' => 1,

@@ -167,13 +167,13 @@ hardening beyond provider-specific baselines.
 
 ## LinkedIn public media analysis
 
-LinkedIn accepts public `/posts/...` URLs and
-`/feed/update/urn:li:activity:<id>/` URLs on the standard, `www`, and mobile hosts.
+LinkedIn accepts public `/posts/...` URLs, `ugcPost` and activity feed-update URNs,
+and bounded `lnkd.in` short links on the standard, `www`, and mobile hosts.
 Tracking parameters and fragments are removed. Post URLs keep a meaningful canonical
 post URL while activity URLs retain their activity form. Profiles, company
-pages, jobs, articles, newsletters, general feeds, authentication pages, and
-`lnkd.in` short links are rejected. Short-link redirects are intentionally not
-resolved in this PR.
+pages, jobs, articles, newsletters, general feeds, and authentication pages are
+rejected. Short links are followed only through a bounded HTTPS redirect chain whose
+final target is an allowlisted public LinkedIn post host.
 
 The adapter requests only the canonical LinkedIn page without credentials or
 persistent cookies. It prefers Open Graph and Twitter Card metadata, then JSON-LD,
@@ -239,7 +239,7 @@ Only these normalized fields are stored:
 - normalized URL
 - safe fallback title
 - optional author or organization
-- optional thumbnail URL
+- optional same-origin preview reference; upstream and expiring CDN URLs are never stored
 - analysis timestamp
 
 The newest five records are kept. Re-analyzing the same normalized URL moves it to the top. Data stays in the current browser, is not synchronized, and can be cleared from the page. If storage is unavailable or corrupt, analysis continues without browser history.
@@ -261,7 +261,7 @@ The following remain intentionally out of scope after PR #9:
 - server-side Recent Fetches persistence
 - cross-browser or cross-device history synchronization
 - TikTok or Facebook extraction logic
-- authenticated, private, authwall-protected, or short-link LinkedIn analysis
+- authenticated, private, or authwall-protected LinkedIn analysis
 - Instagram Stories, Live, private, or login-required extraction
 - X private/protected posts or authenticated extraction
 - centralized PR #10 egress and DNS-rebinding controls

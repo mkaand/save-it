@@ -34,7 +34,8 @@ test('normalizes YouTube video formats without media URLs', () => {
     assert.equal(formats[0].formatId, '137');
     assert.equal(formats[0].requiresMerge, true);
     assert.equal('url' in formats[0], false);
-    assert.match(youtubeVideoFormatLabel(formats[0]), /MP4 1920×1080 · H264/);
+    assert.match(youtubeVideoFormatLabel(formats[0]), /MP4 1920×1080 · H\.264/);
+    assert.match(youtubeVideoFormatLabel(formats[0]), /video and audio will be merged/);
 });
 
 test('normalizes M4A audio and renders bitrate', () => {
@@ -49,7 +50,7 @@ test('normalizes M4A audio and renders bitrate', () => {
 
     assert.equal(formats.length, 1);
     assert.equal(formats[0].container, 'm4a');
-    assert.match(youtubeAudioFormatLabel(formats[0]), /M4A · mp4a\.40\.2 · 129 kbps/);
+    assert.match(youtubeAudioFormatLabel(formats[0]), /M4A · AAC-LC · 129 kbps/);
 });
 
 test('formats durations without throwing on missing data', () => {

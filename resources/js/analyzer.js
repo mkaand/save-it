@@ -33,6 +33,7 @@ import {
     normalizeJobStart,
     normalizeJobStatus,
 } from './download-delivery.js';
+import { canOfferMobileShare, shareMedia } from './mobile-share.js';
 
 function browserStorage() {
     try {
@@ -56,9 +57,12 @@ function element(tag, className, text) {
     return node;
 }
 
-function thumbnail(url, title, className) {
+function thumbnail(url, title, className, dimensions = null) {
     const wrapper = element('div', className);
-    const fallback = element('span', 'thumbnail-fallback', 'SI');
+    const fallback = element('span', 'thumbnail-fallback', 'Preview unavailable');
+    if (dimensions?.width > 0 && dimensions?.height > 0) {
+        wrapper.style.setProperty('--preview-aspect', `${dimensions.width} / ${dimensions.height}`);
+    }
     wrapper.append(fallback);
 
     const safeUrl = safeResultImageUrl(url);
@@ -236,7 +240,11 @@ export function initAnalyzer() {
     function renderResult(data) {
         resultPanel.replaceChildren();
 
-        const media = thumbnail(data.thumbnail_url, data.title, 'result-media');
+        const primaryAsset = Array.isArray(data.assets) ? data.assets[0] : null;
+        const media = thumbnail(data.thumbnail_url, data.title, 'result-media', {
+            width: primaryAsset?.width || data.metadata?.thumbnail_width,
+            height: primaryAsset?.height || data.metadata?.thumbnail_height,
+        });
         const copy = element('div', 'result-copy');
         const meta = element('div', 'result-meta');
         const platform = element('span', 'result-pill result-platform');
@@ -284,6 +292,7 @@ export function initAnalyzer() {
                             ? linkedinAssetLabel(asset)
                             : xAssetLabel(asset)),
                     'x-asset-preview',
+                    { width: asset.width, height: asset.height },
                 );
                 const details = element('div', 'x-asset-details');
                 details.append(
@@ -331,7 +340,7 @@ export function initAnalyzer() {
                 videoGroup.append(element('span', 'youtube-format-chip', youtubeVideoFormatLabel(format)));
             });
             normalizeYouTubeAudioFormats(data.audio_formats).slice(0, 8).forEach((format) => {
-                audioGroup.append(element('span', 'youtube-format-chip', youtubeAudioFormatLabel(format)));
+                audioGroup.append(element('span', 'youtube-audio-card', youtubeAudioFormatLabel(format)));
             });
             groups.append(videoGroup, audioGroup);
             copy.append(summary, groups);
@@ -379,6 +388,21 @@ export function initAnalyzer() {
                 button.addEventListener('click', () => startDownload(output, button));
             }
             outputs.append(button);
+            if (canOfferMobileShare(output)) {
+                const share = element('button', 'output-share', 'Share / Save');
+                share.type = 'button';
+                share.addEventListener('click', async () => {
+                    share.disabled = true;
+                    try {
+                        await shareMedia(output);
+                    } catch (shareError) {
+                        setStatus(shareError?.message || 'Sharing could not be prepared.', 'error');
+                    } finally {
+                        share.disabled = false;
+                    }
+                });
+                outputs.append(share);
+            }
         });
 
         copy.prepend(meta, title, url);
@@ -495,7 +519,7 @@ export function initAnalyzer() {
                 ? 'Network error. Check your connection and try again.'
                 : requestError.message;
             setError(message);
-            setStatus(message, 'error');
+            setStatus('', 'error');
             input.focus();
         } finally {
             setLoading(false);

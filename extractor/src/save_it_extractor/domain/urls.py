@@ -97,7 +97,12 @@ def classify_url(raw_url: str, max_length: int = 2048) -> ProviderContext:
     elif provider is Provider.INSTAGRAM:
         variant = "reel" if normalized.startswith("https://www.instagram.com/reel/") else "post"
     elif provider is Provider.LINKEDIN:
-        variant = "activity" if "/feed/update/urn:li:activity:" in normalized else "post"
+        if hostname == "lnkd.in":
+            variant = "short"
+        elif ":ugcPost:" in normalized:
+            variant = "ugc_post"
+        else:
+            variant = "activity" if ":activity:" in normalized else "post"
 
     return ProviderContext(
         provider=provider,
@@ -116,8 +121,13 @@ YOUTUBE_VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
 YOUTUBE_SHORTS_PATH = re.compile(r"^/shorts/([A-Za-z0-9_-]{11})/?$")
 YOUTUBE_SHORT_URL_PATH = re.compile(r"^/([A-Za-z0-9_-]{11})/?$")
 LINKEDIN_POST_PATH = re.compile(r"^/posts/([^/]{3,600})/?$")
-LINKEDIN_ACTIVITY_PATH = re.compile(r"^/feed/update/urn:li:activity:([0-9]{6,30})/?$")
-LINKEDIN_ACTIVITY_IN_SLUG = re.compile(r"(?:^|[-_])activity[-_:]([0-9]{6,30})(?:[-_]|$)")
+LINKEDIN_URN_PATH = re.compile(
+    r"^/feed/update/urn:li:(activity|ugcPost):([0-9]{6,30})/?$", re.IGNORECASE
+)
+LINKEDIN_URN_IN_SLUG = re.compile(
+    r"(?:^|[-_])(activity|ugcPost)[-_:]([0-9]{6,30})(?:[-_]|$)", re.IGNORECASE
+)
+LINKEDIN_SHORT_PATH = re.compile(r"^/(?:p/)?([A-Za-z0-9_-]{4,128})/?$")
 INVALID_PERCENT_ENCODING = re.compile(r"%(?![A-Fa-f0-9]{2})")
 
 
@@ -191,14 +201,19 @@ def _normalize_youtube_url(hostname: str, parsed: SplitResult) -> str:
 
 def _normalize_linkedin_url(hostname: str, parsed: SplitResult) -> str:
     if hostname == "lnkd.in":
-        raise UrlValidationError(
-            "linkedin_short_url_not_supported",
-            "LinkedIn short links are not supported. Use the full public post URL.",
-        )
+        match = LINKEDIN_SHORT_PATH.fullmatch(parsed.path)
+        if match is None:
+            raise UrlValidationError(
+                "invalid_linkedin_post_url", "LinkedIn supports public post URLs only."
+            )
+        prefix = "p/" if parsed.path.startswith("/p/") else ""
+        return f"https://lnkd.in/{prefix}{match.group(1)}"
 
-    activity = LINKEDIN_ACTIVITY_PATH.fullmatch(parsed.path)
-    if activity is not None:
-        return f"https://www.linkedin.com/feed/update/urn:li:activity:{activity.group(1)}/"
+    urn = LINKEDIN_URN_PATH.fullmatch(parsed.path)
+    if urn is not None:
+        kind, identifier = urn.groups()
+        canonical_kind = "ugcPost" if kind.lower() == "ugcpost" else "activity"
+        return f"https://www.linkedin.com/feed/update/urn:li:{canonical_kind}:{identifier}/"
 
     post = LINKEDIN_POST_PATH.fullmatch(parsed.path)
     if post is not None:
@@ -219,7 +234,7 @@ def _normalize_linkedin_url(hostname: str, parsed: SplitResult) -> str:
             not decoded_slug
             or len(decoded_slug) > 300
             or any(ord(character) < 32 for character in decoded_slug)
-            or LINKEDIN_ACTIVITY_IN_SLUG.search(decoded_slug) is None
+            or LINKEDIN_URN_IN_SLUG.search(decoded_slug) is None
         ):
             raise UrlValidationError(
                 "invalid_linkedin_post_url",
