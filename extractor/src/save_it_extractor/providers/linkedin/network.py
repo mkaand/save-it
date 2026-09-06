@@ -187,36 +187,70 @@ class LinkedInMetadataClient:
     async def resolve_short_link(self, short_url: str) -> str:
         """Resolve only an lnkd.in redirect chain ending at a public LinkedIn host."""
         url = short_url
-        timeout = httpx.Timeout(settings.linkedin_read_timeout_seconds, connect=settings.linkedin_connect_timeout_seconds)
+        timeout = httpx.Timeout(
+            settings.linkedin_read_timeout_seconds,
+            connect=settings.linkedin_connect_timeout_seconds,
+        )
         async with httpx.AsyncClient(
             timeout=timeout,
             trust_env=False,
             follow_redirects=False,
             transport=self.transport,
-            headers={"User-Agent": "Save-It-Metadata-Extractor/1 (+https://github.com/mkaand/save-it)"},
+            headers={
+                "User-Agent": "Save-It-Metadata-Extractor/1 (+https://github.com/mkaand/save-it)"
+            },
         ) as client:
             for redirect_count in range(settings.linkedin_max_redirects + 1):
                 await _validate_redirect_url(url, allow_short=redirect_count == 0)
                 try:
                     response = await client.get(url)
                 except httpx.TimeoutException as exception:
-                    raise ProviderError("provider_timeout", "LinkedIn did not respond before the analysis deadline.", 503, {"provider": "linkedin"}) from exception
+                    raise ProviderError(
+                        "provider_timeout",
+                        "LinkedIn did not respond before the analysis deadline.",
+                        503,
+                        {"provider": "linkedin"},
+                    ) from exception
                 except httpx.NetworkError as exception:
-                    raise ProviderError("temporary_provider_error", "LinkedIn metadata is temporarily unavailable.", 503, {"provider": "linkedin"}) from exception
+                    raise ProviderError(
+                        "temporary_provider_error",
+                        "LinkedIn metadata is temporarily unavailable.",
+                        503,
+                        {"provider": "linkedin"},
+                    ) from exception
                 if not response.is_redirect:
                     hostname = (urlsplit(url).hostname or "").rstrip(".").lower()
                     if hostname in METADATA_HOSTS:
                         return url
-                    raise ProviderError("disallowed_redirect", "LinkedIn returned an unsafe redirect.", 502, {"provider": "linkedin"})
+                    raise ProviderError(
+                        "disallowed_redirect", "LinkedIn returned an unsafe redirect.", 502, {"provider": "linkedin"}
+                    )
                 if redirect_count >= settings.linkedin_max_redirects:
-                    raise ProviderError("upstream_blocked", "LinkedIn returned too many redirects for anonymous access.", 503, {"provider": "linkedin"})
+                    raise ProviderError(
+                        "upstream_blocked",
+                        "LinkedIn returned too many redirects for anonymous access.",
+                        503,
+                        {"provider": "linkedin"},
+                    )
                 location = response.headers.get("location")
                 if not location:
-                    raise ProviderError("disallowed_redirect", "LinkedIn returned an unsafe redirect.", 502, {"provider": "linkedin"})
+                    raise ProviderError(
+                        "disallowed_redirect", "LinkedIn returned an unsafe redirect.", 502, {"provider": "linkedin"}
+                    )
                 url = urljoin(url, location)
                 if _is_auth_url(url):
-                    raise ProviderError("authentication_required", "This LinkedIn post requires signing in and cannot be analyzed anonymously.", 422, {"provider": "linkedin"})
-        raise ProviderError("temporary_provider_error", "LinkedIn metadata is temporarily unavailable.", 503, {"provider": "linkedin"})
+                    raise ProviderError(
+                        "authentication_required",
+                        "This LinkedIn post requires signing in and cannot be analyzed anonymously.",
+                        422,
+                        {"provider": "linkedin"},
+                    )
+        raise ProviderError(
+            "temporary_provider_error",
+            "LinkedIn metadata is temporarily unavailable.",
+            503,
+            {"provider": "linkedin"},
+        )
 
 
 def _is_auth_url(raw_url: str) -> bool:
