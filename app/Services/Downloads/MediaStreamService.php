@@ -67,6 +67,22 @@ final class MediaStreamService
         $length = $this->positiveHeader($response, 'Content-Length');
         $contentRange = $this->contentRange($response);
         if (
+            $rangeHeader !== null
+            && (
+                $response->status() !== 206
+                || $contentRange === null
+                || $length === null
+                || $length !== ($contentRange['end'] - $contentRange['start'] + 1)
+                || ! $this->matchesRequestedRange($rangeHeader, $contentRange)
+            )
+        ) {
+            throw new DownloadException(
+                'invalid_upstream_range',
+                502,
+                'The media source returned an invalid byte range response.',
+            );
+        }
+        if (
             $response->status() === 206
             && (
                 $rangeHeader === null
@@ -243,6 +259,34 @@ final class MediaStreamService
         }
 
         return $range;
+    }
+
+    /** @param array{start: int, end: int, total: int} $contentRange */
+    private function matchesRequestedRange(string $requested, array $contentRange): bool
+    {
+        if (preg_match('/^bytes=([0-9]+)-([0-9]+)$/', $requested, $matches) === 1) {
+            return $contentRange['start'] === (int) $matches[1]
+                && $contentRange['end'] === (int) $matches[2];
+        }
+
+        if (preg_match('/^bytes=([0-9]+)-$/', $requested, $matches) === 1) {
+            return $contentRange['start'] === (int) $matches[1]
+                && $contentRange['end'] >= $contentRange['start'];
+        }
+
+        if (preg_match('/^bytes=-([0-9]+)$/', $requested, $matches) !== 1) {
+            return false;
+        }
+
+        $suffixLength = (int) $matches[1];
+        if ($suffixLength < 1) {
+            return false;
+        }
+
+        $start = max(0, $contentRange['total'] - $suffixLength);
+
+        return $contentRange['start'] === $start
+            && $contentRange['end'] === $contentRange['total'] - 1;
     }
 
     /** @param array<string, mixed> $payload */

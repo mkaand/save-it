@@ -103,6 +103,27 @@ class DownloadDeliveryTest extends TestCase
         Http::assertSentCount(1);
     }
 
+    public function test_range_response_must_not_be_wider_than_an_explicit_client_range(): void
+    {
+        Http::fake([
+            '*' => Http::response(str_repeat('x', 1024), 206, [
+                'Content-Type' => 'video/mp4',
+                'Content-Length' => '1024',
+                'Content-Range' => 'bytes 0-1023/2048',
+            ]),
+        ]);
+        $token = $this->app->make(DownloadAssetStore::class)->issue([
+            ...$this->asset(),
+            'expected_size' => null,
+        ]);
+
+        $this->withHeader('Range', 'bytes=0-0')
+            ->getJson("/api/downloads/{$token}")
+            ->assertStatus(502)
+            ->assertJsonPath('error.code', 'invalid_upstream_range');
+        Http::assertSentCount(1);
+    }
+
     public function test_unknown_size_arbitrary_single_range_is_validated_without_a_probe(): void
     {
         Http::fake(function ($request) {
@@ -125,6 +146,90 @@ class DownloadDeliveryTest extends TestCase
             ->assertHeader('Content-Range', 'bytes 10-19/100')
             ->assertHeader('Accept-Ranges', 'bytes');
         Http::assertSentCount(1);
+    }
+
+    public function test_explicit_range_response_must_match_the_requested_end_byte(): void
+    {
+        Http::fake([
+            '*' => Http::response(str_repeat('x', 11), 206, [
+                'Content-Type' => 'video/mp4',
+                'Content-Length' => '11',
+                'Content-Range' => 'bytes 10-20/100',
+            ]),
+        ]);
+        $token = $this->app->make(DownloadAssetStore::class)->issue($this->asset());
+
+        $this->withHeader('Range', 'bytes=10-19')
+            ->getJson("/api/downloads/{$token}")
+            ->assertStatus(502)
+            ->assertJsonPath('error.code', 'invalid_upstream_range');
+    }
+
+    public function test_open_ended_range_accepts_a_partial_response_from_the_requested_start(): void
+    {
+        Http::fake([
+            '*' => Http::response(str_repeat('x', 100), 206, [
+                'Content-Type' => 'video/mp4',
+                'Content-Length' => '100',
+                'Content-Range' => 'bytes 100-199/200',
+            ]),
+        ]);
+        $token = $this->app->make(DownloadAssetStore::class)->issue($this->asset());
+
+        $this->withHeader('Range', 'bytes=100-')
+            ->get("/api/downloads/{$token}")
+            ->assertStatus(206)
+            ->assertHeader('Content-Range', 'bytes 100-199/200');
+    }
+
+    public function test_suffix_range_requires_the_correct_final_bytes(): void
+    {
+        Http::fake([
+            '*' => Http::response(str_repeat('x', 10), 206, [
+                'Content-Type' => 'video/mp4',
+                'Content-Length' => '10',
+                'Content-Range' => 'bytes 90-99/100',
+            ]),
+        ]);
+        $token = $this->app->make(DownloadAssetStore::class)->issue($this->asset());
+
+        $this->withHeader('Range', 'bytes=-10')
+            ->get("/api/downloads/{$token}")
+            ->assertStatus(206)
+            ->assertHeader('Content-Range', 'bytes 90-99/100');
+    }
+
+    public function test_suffix_range_uses_the_complete_small_file_when_it_is_shorter_than_requested(): void
+    {
+        Http::fake([
+            '*' => Http::response('small', 206, [
+                'Content-Type' => 'video/mp4',
+                'Content-Length' => '5',
+                'Content-Range' => 'bytes 0-4/5',
+            ]),
+        ]);
+        $token = $this->app->make(DownloadAssetStore::class)->issue($this->asset());
+
+        $this->withHeader('Range', 'bytes=-10')
+            ->get("/api/downloads/{$token}")
+            ->assertStatus(206)
+            ->assertHeader('Content-Range', 'bytes 0-4/5');
+    }
+
+    public function test_upstream_full_response_is_rejected_when_a_client_range_was_requested(): void
+    {
+        Http::fake([
+            '*' => Http::response('complete', 200, [
+                'Content-Type' => 'video/mp4',
+                'Content-Length' => '8',
+            ]),
+        ]);
+        $token = $this->app->make(DownloadAssetStore::class)->issue($this->asset());
+
+        $this->withHeader('Range', 'bytes=0-0')
+            ->getJson("/api/downloads/{$token}")
+            ->assertStatus(502)
+            ->assertJsonPath('error.code', 'invalid_upstream_range');
     }
 
     public function test_valid_partial_response_synthesizes_accept_ranges_when_upstream_omits_it(): void
