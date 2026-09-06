@@ -75,6 +75,219 @@ class DownloadDeliveryTest extends TestCase
             ->assertHeader('Accept-Ranges', 'bytes')
             ->assertHeader('Content-Disposition');
         $this->assertSame('x', $response->streamedContent());
+        Http::assertSentCount(1);
+    }
+
+    public function test_unknown_size_range_skips_probe_and_uses_the_client_range_response(): void
+    {
+        Http::fake(function ($request) {
+            $this->assertSame('bytes=0-0', $request->header('Range')[0] ?? null);
+
+            return Http::response('x', 206, [
+                'Content-Type' => 'video/mp4',
+                'Content-Length' => '1',
+                'Content-Range' => 'bytes 0-0/100',
+            ]);
+        });
+        $token = $this->app->make(DownloadAssetStore::class)->issue([
+            ...$this->asset(),
+            'expected_size' => null,
+        ]);
+
+        $response = $this->withHeader('Range', 'bytes=0-0')->get("/api/downloads/{$token}");
+
+        $response->assertStatus(206)
+            ->assertHeader('Content-Range', 'bytes 0-0/100')
+            ->assertHeader('Accept-Ranges', 'bytes');
+        $this->assertSame('x', $response->streamedContent());
+        Http::assertSentCount(1);
+    }
+
+    public function test_range_response_with_the_same_start_is_normalized_to_an_explicit_client_range(): void
+    {
+        Http::fake([
+            '*' => Http::response(str_repeat('x', 1000), 206, [
+                'Content-Type' => 'video/mp4',
+                'Content-Length' => '1000',
+                'Content-Range' => 'bytes 0-999/1000',
+            ]),
+        ]);
+        $token = $this->app->make(DownloadAssetStore::class)->issue([
+            ...$this->asset(),
+            'expected_size' => null,
+        ]);
+
+        $response = $this->withHeader('Range', 'bytes=0-0')->get("/api/downloads/{$token}");
+
+        $response->assertStatus(206)
+            ->assertHeader('Content-Length', '1')
+            ->assertHeader('Content-Range', 'bytes 0-0/1000')
+            ->assertHeader('Accept-Ranges', 'bytes');
+        $this->assertSame('x', $response->streamedContent());
+        Http::assertSentCount(1);
+    }
+
+    public function test_unknown_size_arbitrary_single_range_is_validated_without_a_probe(): void
+    {
+        Http::fake(function ($request) {
+            $this->assertSame('bytes=10-19', $request->header('Range')[0] ?? null);
+
+            return Http::response('0123456789', 206, [
+                'Content-Type' => 'video/mp4',
+                'Content-Length' => '10',
+                'Content-Range' => 'bytes 10-19/100',
+            ]);
+        });
+        $token = $this->app->make(DownloadAssetStore::class)->issue([
+            ...$this->asset(),
+            'expected_size' => null,
+        ]);
+
+        $response = $this->withHeader('Range', 'bytes=10-19')->get("/api/downloads/{$token}");
+
+        $response->assertStatus(206)
+            ->assertHeader('Content-Range', 'bytes 10-19/100')
+            ->assertHeader('Accept-Ranges', 'bytes');
+        Http::assertSentCount(1);
+    }
+
+    public function test_explicit_range_subset_is_accepted(): void
+    {
+        Http::fake([
+            '*' => Http::response('12345', 206, [
+                'Content-Type' => 'video/mp4',
+                'Content-Length' => '5',
+                'Content-Range' => 'bytes 10-14/100',
+            ]),
+        ]);
+        $token = $this->app->make(DownloadAssetStore::class)->issue($this->asset());
+
+        $response = $this->withHeader('Range', 'bytes=10-19')->get("/api/downloads/{$token}");
+
+        $response->assertStatus(206)
+            ->assertHeader('Content-Length', '5')
+            ->assertHeader('Content-Range', 'bytes 10-14/100');
+        $this->assertSame('12345', $response->streamedContent());
+    }
+
+    public function test_explicit_range_superset_with_the_same_start_is_normalized(): void
+    {
+        Http::fake([
+            '*' => Http::response(str_repeat('x', 1014), 206, [
+                'Content-Type' => 'video/mp4',
+                'Content-Length' => '1014',
+                'Content-Range' => 'bytes 10-1023/1024',
+            ]),
+        ]);
+        $token = $this->app->make(DownloadAssetStore::class)->issue($this->asset());
+
+        $response = $this->withHeader('Range', 'bytes=10-19')->get("/api/downloads/{$token}");
+
+        $response->assertStatus(206)
+            ->assertHeader('Content-Length', '10')
+            ->assertHeader('Content-Range', 'bytes 10-19/1024');
+        $this->assertSame(str_repeat('x', 10), $response->streamedContent());
+    }
+
+    public function test_disjoint_explicit_range_is_rejected(): void
+    {
+        Http::fake([
+            '*' => Http::response(str_repeat('x', 10), 206, [
+                'Content-Type' => 'video/mp4',
+                'Content-Length' => '10',
+                'Content-Range' => 'bytes 20-29/100',
+            ]),
+        ]);
+        $token = $this->app->make(DownloadAssetStore::class)->issue($this->asset());
+
+        $this->withHeader('Range', 'bytes=10-19')
+            ->getJson("/api/downloads/{$token}")
+            ->assertStatus(502)
+            ->assertJsonPath('error.code', 'invalid_upstream_range');
+    }
+
+    public function test_explicit_range_with_an_earlier_upstream_start_is_rejected(): void
+    {
+        Http::fake([
+            '*' => Http::response(str_repeat('x', 1024), 206, [
+                'Content-Type' => 'video/mp4',
+                'Content-Length' => '1024',
+                'Content-Range' => 'bytes 0-1023/1024',
+            ]),
+        ]);
+        $token = $this->app->make(DownloadAssetStore::class)->issue($this->asset());
+
+        $this->withHeader('Range', 'bytes=10-19')
+            ->getJson("/api/downloads/{$token}")
+            ->assertStatus(502)
+            ->assertJsonPath('error.code', 'invalid_upstream_range');
+    }
+
+    public function test_open_ended_range_accepts_a_partial_response_from_the_requested_start(): void
+    {
+        Http::fake([
+            '*' => Http::response(str_repeat('x', 100), 206, [
+                'Content-Type' => 'video/mp4',
+                'Content-Length' => '100',
+                'Content-Range' => 'bytes 100-199/200',
+            ]),
+        ]);
+        $token = $this->app->make(DownloadAssetStore::class)->issue($this->asset());
+
+        $this->withHeader('Range', 'bytes=100-')
+            ->get("/api/downloads/{$token}")
+            ->assertStatus(206)
+            ->assertHeader('Content-Range', 'bytes 100-199/200');
+    }
+
+    public function test_suffix_range_requires_the_correct_final_bytes(): void
+    {
+        Http::fake([
+            '*' => Http::response(str_repeat('x', 10), 206, [
+                'Content-Type' => 'video/mp4',
+                'Content-Length' => '10',
+                'Content-Range' => 'bytes 90-99/100',
+            ]),
+        ]);
+        $token = $this->app->make(DownloadAssetStore::class)->issue($this->asset());
+
+        $this->withHeader('Range', 'bytes=-10')
+            ->get("/api/downloads/{$token}")
+            ->assertStatus(206)
+            ->assertHeader('Content-Range', 'bytes 90-99/100');
+    }
+
+    public function test_suffix_range_uses_the_complete_small_file_when_it_is_shorter_than_requested(): void
+    {
+        Http::fake([
+            '*' => Http::response('small', 206, [
+                'Content-Type' => 'video/mp4',
+                'Content-Length' => '5',
+                'Content-Range' => 'bytes 0-4/5',
+            ]),
+        ]);
+        $token = $this->app->make(DownloadAssetStore::class)->issue($this->asset());
+
+        $this->withHeader('Range', 'bytes=-10')
+            ->get("/api/downloads/{$token}")
+            ->assertStatus(206)
+            ->assertHeader('Content-Range', 'bytes 0-4/5');
+    }
+
+    public function test_upstream_full_response_is_rejected_when_a_client_range_was_requested(): void
+    {
+        Http::fake([
+            '*' => Http::response('complete', 200, [
+                'Content-Type' => 'video/mp4',
+                'Content-Length' => '8',
+            ]),
+        ]);
+        $token = $this->app->make(DownloadAssetStore::class)->issue($this->asset());
+
+        $this->withHeader('Range', 'bytes=0-0')
+            ->getJson("/api/downloads/{$token}")
+            ->assertStatus(502)
+            ->assertJsonPath('error.code', 'invalid_upstream_range');
     }
 
     public function test_valid_partial_response_synthesizes_accept_ranges_when_upstream_omits_it(): void
@@ -196,6 +409,7 @@ class DownloadDeliveryTest extends TestCase
             ->getJson("/api/downloads/{$token}")
             ->assertStatus(413)
             ->assertJsonPath('error.code', 'media_too_large');
+        Http::assertSentCount(1);
     }
 
     public function test_proxy_uses_a_bounded_range_probe_when_an_asset_omits_content_length(): void
@@ -221,7 +435,36 @@ class DownloadDeliveryTest extends TestCase
         $response->assertOk()->assertHeader('Content-Type', 'image/jpeg');
         $this->assertSame('complete', $response->streamedContent());
         Http::assertSentCount(2);
-        Http::assertSent(static fn ($request): bool => $request->hasHeader('Range', 'bytes=0-0'));
+        $this->assertSame(
+            [['bytes=0-0'], []],
+            Http::recorded()->map(
+                static fn (array $pair): array => $pair[0]->header('Range'),
+            )->all(),
+        );
+    }
+
+    public function test_known_size_full_download_does_not_probe(): void
+    {
+        Http::fake(function ($request) {
+            $this->assertSame([], $request->header('Range'));
+
+            return Http::response('complete', 200, [
+                'Content-Type' => 'image/jpeg',
+                'Content-Length' => '8',
+            ]);
+        });
+        $token = $this->app->make(DownloadAssetStore::class)->issue([
+            ...$this->asset(),
+            'mime_type' => 'image/jpeg',
+            'filename' => 'preview.jpg',
+            'expected_size' => 8,
+        ]);
+
+        $response = $this->get("/api/downloads/{$token}");
+
+        $response->assertOk();
+        $this->assertSame('complete', $response->streamedContent());
+        Http::assertSentCount(1);
     }
 
     public function test_job_endpoint_dispatches_only_a_signed_supported_plan(): void

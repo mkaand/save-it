@@ -30,7 +30,7 @@ final class MediaStreamService
         $filename = $this->filename($this->requiredString($asset, 'filename'));
         $rangeHeader = $this->range($range);
         $expected = is_int($asset['expected_size'] ?? null) ? $asset['expected_size'] : null;
-        if ($expected === null) {
+        if ($expected === null && $rangeHeader === null) {
             $expected = $this->probeSize($url, $provider);
         }
         $response = $this->request($url, $provider, $rangeHeader);
@@ -66,6 +66,32 @@ final class MediaStreamService
 
         $length = $this->positiveHeader($response, 'Content-Length');
         $contentRange = $this->contentRange($response);
+        $downstreamRange = null;
+        if (
+            $rangeHeader !== null
+            && (
+                $response->status() !== 206
+                || $contentRange === null
+                || $length === null
+                || $length !== ($contentRange['end'] - $contentRange['start'] + 1)
+            )
+        ) {
+            throw new DownloadException(
+                'invalid_upstream_range',
+                502,
+                'The media source returned an invalid byte range response.',
+            );
+        }
+        if ($rangeHeader !== null && $contentRange !== null) {
+            $downstreamRange = $this->downstreamRange($rangeHeader, $contentRange);
+            if ($downstreamRange === null) {
+                throw new DownloadException(
+                    'invalid_upstream_range',
+                    502,
+                    'The media source returned an invalid byte range response.',
+                );
+            }
+        }
         if (
             $response->status() === 206
             && (
@@ -110,30 +136,36 @@ final class MediaStreamService
             'X-Content-Type-Options' => 'nosniff',
             'X-Accel-Buffering' => 'no',
         ];
-        if ($length !== null) {
-            $headers['Content-Length'] = (string) $length;
+        $downstreamLength = $downstreamRange === null
+            ? $length
+            : $downstreamRange['end'] - $downstreamRange['start'] + 1;
+        if ($downstreamLength !== null) {
+            $headers['Content-Length'] = (string) $downstreamLength;
         }
-        if ($response->status() === 206 && $contentRange !== null) {
+        if ($response->status() === 206 && $downstreamRange !== null) {
             $headers['Content-Range'] = sprintf(
                 'bytes %d-%d/%d',
-                $contentRange['start'],
-                $contentRange['end'],
-                $contentRange['total'],
+                $downstreamRange['start'],
+                $downstreamRange['end'],
+                $downstreamRange['total'],
             );
             $headers['Accept-Ranges'] = 'bytes';
         }
 
         $body = $response->toPsrResponse()->getBody();
 
-        return response()->stream(function () use ($body, $length, $limit): void {
+        return response()->stream(function () use ($body, $downstreamLength, $limit): void {
             $sent = 0;
             try {
-                while (($length === null || $sent < $length) && ! $body->eof()) {
+                while (($downstreamLength === null || $sent < $downstreamLength) && ! $body->eof()) {
                     if (connection_aborted()) {
                         break;
                     }
                     try {
-                        $chunk = $body->read(min(64 * 1024, $length === null ? 64 * 1024 : $length - $sent));
+                        $chunk = $body->read(min(
+                            64 * 1024,
+                            $downstreamLength === null ? 64 * 1024 : $downstreamLength - $sent,
+                        ));
                     } catch (\RuntimeException) {
                         break;
                     }
@@ -243,6 +275,76 @@ final class MediaStreamService
         }
 
         return $range;
+    }
+
+    /**
+     * @param  array{start: int, end: int, total: int}  $contentRange
+     * @return array{start: int, end: int, total: int}|null
+     */
+    private function downstreamRange(string $requested, array $contentRange): ?array
+    {
+        $requestedRange = $this->resolvedRequestedRange($requested, $contentRange['total']);
+        if ($requestedRange === null) {
+            return null;
+        }
+
+        if (
+            $contentRange['start'] >= $requestedRange['start']
+            && $contentRange['end'] <= $requestedRange['end']
+        ) {
+            return $contentRange;
+        }
+
+        if (
+            $contentRange['start'] === $requestedRange['start']
+            && $contentRange['end'] >= $requestedRange['end']
+        ) {
+            return $requestedRange;
+        }
+
+        return null;
+    }
+
+    /** @return array{start: int, end: int, total: int}|null */
+    private function resolvedRequestedRange(string $requested, int $total): ?array
+    {
+        if (preg_match('/^bytes=([0-9]+)-([0-9]+)$/', $requested, $matches) === 1) {
+            $start = (int) $matches[1];
+            $end = (int) $matches[2];
+            if ($start > $end || $start >= $total) {
+                return null;
+            }
+
+            return [
+                'start' => $start,
+                'end' => min($end, $total - 1),
+                'total' => $total,
+            ];
+        }
+
+        if (preg_match('/^bytes=([0-9]+)-$/', $requested, $matches) === 1) {
+            $start = (int) $matches[1];
+            if ($start >= $total) {
+                return null;
+            }
+
+            return ['start' => $start, 'end' => $total - 1, 'total' => $total];
+        }
+
+        if (preg_match('/^bytes=-([0-9]+)$/', $requested, $matches) !== 1) {
+            return null;
+        }
+
+        $suffixLength = (int) $matches[1];
+        if ($suffixLength < 1) {
+            return null;
+        }
+
+        return [
+            'start' => max(0, $total - $suffixLength),
+            'end' => $total - 1,
+            'total' => $total,
+        ];
     }
 
     /** @param array<string, mixed> $payload */
