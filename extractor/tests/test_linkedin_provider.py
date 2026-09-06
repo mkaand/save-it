@@ -123,11 +123,33 @@ def test_non_post_linkedin_urls_are_rejected(url: str) -> None:
         classify_url(url)
 
 
-def test_linkedin_short_links_are_rejected_with_explicit_error() -> None:
-    with pytest.raises(UrlValidationError) as exception:
-        classify_url("https://lnkd.in/example")
+def test_linkedin_short_links_are_classified_for_safe_resolution() -> None:
+    context = classify_url("https://lnkd.in/p/dNbGhF6x?tracking=ignored")
 
-    assert exception.value.code == "linkedin_short_url_not_supported"
+    assert context.provider is Provider.LINKEDIN
+    assert context.normalized_url == "https://lnkd.in/p/dNbGhF6x"
+    assert context.variant == "short"
+
+
+@pytest.mark.parametrize(
+    ("url", "normalized", "variant"),
+    [
+        (
+            "https://www.linkedin.com/posts/example-ugcPost-7488523465986187265-Joeg/?utm_source=share",
+            "https://www.linkedin.com/posts/example-ugcPost-7488523465986187265-Joeg/",
+            "post",
+        ),
+        (
+            "https://linkedin.com/feed/update/urn:li:ugcPost:7488523465986187265/?trk=share",
+            "https://www.linkedin.com/feed/update/urn:li:ugcPost:7488523465986187265/",
+            "ugc_post",
+        ),
+    ],
+)
+def test_linkedin_ugc_post_urls_preserve_urn_semantics(url: str, normalized: str, variant: str) -> None:
+    context = classify_url(url)
+    assert context.normalized_url == normalized
+    assert context.variant == variant
 
 
 @pytest.mark.parametrize(
@@ -354,6 +376,31 @@ def test_redirect_hosts_authwall_and_private_dns_are_revalidated(
     with pytest.raises(ProviderError) as private:
         asyncio.run(LinkedInMetadataClient(httpx.MockTransport(arbitrary)).fetch(ACTIVITY_URL))
     assert private.value.code == "disallowed_redirect"
+
+
+def test_short_link_resolution_only_accepts_linkedin_targets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(socket, "getaddrinfo", public_dns)
+
+    async def success(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "lnkd.in":
+            return httpx.Response(302, headers={"location": ACTIVITY_URL})
+        return httpx.Response(200, headers={"content-type": "text/html"})
+
+    resolved = asyncio.run(
+        LinkedInMetadataClient(httpx.MockTransport(success)).resolve_short_link("https://lnkd.in/p/dNbGhF6x")
+    )
+    assert resolved == ACTIVITY_URL
+
+    async def unsafe(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(302, headers={"location": "https://example.com/post"})
+
+    with pytest.raises(ProviderError) as exception:
+        asyncio.run(
+            LinkedInMetadataClient(httpx.MockTransport(unsafe)).resolve_short_link("https://lnkd.in/p/dNbGhF6x")
+        )
+    assert exception.value.code == "disallowed_redirect"
 
 
 @pytest.mark.parametrize(

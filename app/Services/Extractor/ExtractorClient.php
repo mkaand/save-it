@@ -611,8 +611,8 @@ final class ExtractorClient
         $postSlug = str_starts_with($path, '/posts/') && str_ends_with($path, '/')
             ? substr($path, 7, -1)
             : '';
-        $validPath = $variant === 'activity'
-            ? preg_match('#^/feed/update/urn:li:activity:[0-9]{6,30}/$#', $path) === 1
+        $validPath = in_array($variant, ['activity', 'ugc_post'], true)
+            ? preg_match('#^/feed/update/urn:li:(?:activity|ugcPost):[0-9]{6,30}/$#', $path) === 1
             : ($variant === 'post'
                 && strlen($postSlug) >= 3
                 && strlen($postSlug) <= 900
@@ -637,7 +637,7 @@ final class ExtractorClient
             MediaPlatform::Instagram => in_array($variant, ['post', 'reel'], true),
             MediaPlatform::YouTube => $variant === 'video',
             MediaPlatform::YouTubeShorts => $variant === 'shorts',
-            MediaPlatform::LinkedIn => in_array($variant, ['post', 'activity'], true),
+            MediaPlatform::LinkedIn => in_array($variant, ['post', 'activity', 'ugc_post'], true),
             default => false,
         };
     }
@@ -811,7 +811,7 @@ final class ExtractorClient
         }
 
         if ($provider === MediaPlatform::LinkedIn->value) {
-            return in_array($variant, ['post', 'activity'], true)
+            return in_array($variant, ['post', 'activity', 'ugc_post'], true)
                 ? MediaPlatform::LinkedIn
                 : null;
         }
