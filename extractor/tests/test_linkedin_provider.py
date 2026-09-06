@@ -391,7 +391,9 @@ def test_short_link_resolution_only_accepts_linkedin_targets(
         return httpx.Response(200, headers={"content-type": "text/html"})
 
     resolved = asyncio.run(
-        LinkedInMetadataClient(httpx.MockTransport(success)).resolve_short_link("https://lnkd.in/p/dNbGhF6x")
+        LinkedInMetadataClient(httpx.MockTransport(success)).resolve_short_link(
+            "https://lnkd.in/p/dNbGhF6x"
+        )
     )
     assert resolved == ACTIVITY_URL
 
@@ -400,7 +402,9 @@ def test_short_link_resolution_only_accepts_linkedin_targets(
 
     with pytest.raises(ProviderError) as exception:
         asyncio.run(
-            LinkedInMetadataClient(httpx.MockTransport(unsafe)).resolve_short_link("https://lnkd.in/p/dNbGhF6x")
+            LinkedInMetadataClient(httpx.MockTransport(unsafe)).resolve_short_link(
+                "https://lnkd.in/p/dNbGhF6x"
+            )
         )
     assert exception.value.code == "disallowed_redirect"
 
