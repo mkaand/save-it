@@ -30,8 +30,16 @@ final class MediaStreamService
         $filename = $this->filename($this->requiredString($asset, 'filename'));
         $rangeHeader = $this->range($range);
         $expected = is_int($asset['expected_size'] ?? null) ? $asset['expected_size'] : null;
+        $limit = max(1, (int) config('services.downloads.max_file_bytes'));
         if ($expected === null && $rangeHeader === null) {
             $expected = $this->probeSize($url, $provider);
+        }
+        if ($expected !== null && $expected > $limit) {
+            throw new DownloadException(
+                'media_too_large',
+                413,
+                'The media file exceeds the download size limit.',
+            );
         }
         $response = $this->request($url, $provider, $rangeHeader);
 
@@ -108,7 +116,6 @@ final class MediaStreamService
             );
         }
         $total = $contentRange['total'] ?? null;
-        $limit = max(1, (int) config('services.downloads.max_file_bytes'));
         if (
             ($length !== null && $length > $limit)
             || ($total !== null && $total > $limit)
@@ -244,7 +251,12 @@ final class MediaStreamService
             if ($response->status() === 206) {
                 $range = $this->contentRange($response);
                 $length = $this->positiveHeader($response, 'Content-Length');
-                if ($range === null || $length !== 1 || $range['start'] !== 0 || $range['end'] !== 0) {
+                if (
+                    $range === null
+                    || $length === null
+                    || $length !== ($range['end'] - $range['start'] + 1)
+                    || $range['start'] !== 0
+                ) {
                     throw new DownloadException(
                         'invalid_upstream_range',
                         502,

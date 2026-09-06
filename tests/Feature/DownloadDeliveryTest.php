@@ -443,6 +443,141 @@ class DownloadDeliveryTest extends TestCase
         );
     }
 
+    public function test_wide_same_start_probe_discovers_size_before_a_full_download(): void
+    {
+        Http::fakeSequence()
+            ->push(str_repeat('x', 100), 206, [
+                'Content-Type' => 'image/jpeg',
+                'Content-Length' => '100',
+                'Content-Range' => 'bytes 0-99/100',
+            ])
+            ->push('complete', 200, [
+                'Content-Type' => 'image/jpeg',
+                'Content-Length' => '8',
+            ]);
+        $token = $this->app->make(DownloadAssetStore::class)->issue([
+            ...$this->asset(),
+            'mime_type' => 'image/jpeg',
+            'filename' => 'preview.jpg',
+            'expected_size' => null,
+        ]);
+
+        $response = $this->get("/api/downloads/{$token}");
+
+        $response->assertOk();
+        $this->assertSame('complete', $response->streamedContent());
+        Http::assertSentCount(2);
+        $this->assertSame(
+            [['bytes=0-0'], []],
+            Http::recorded()->map(
+                static fn (array $pair): array => $pair[0]->header('Range'),
+            )->all(),
+        );
+    }
+
+    public function test_probe_rejects_a_range_that_does_not_start_at_zero(): void
+    {
+        Http::fake([
+            '*' => Http::response(str_repeat('x', 99), 206, [
+                'Content-Type' => 'image/jpeg',
+                'Content-Length' => '99',
+                'Content-Range' => 'bytes 1-99/100',
+            ]),
+        ]);
+        $token = $this->app->make(DownloadAssetStore::class)->issue([
+            ...$this->asset(),
+            'expected_size' => null,
+        ]);
+
+        $this->getJson("/api/downloads/{$token}")
+            ->assertStatus(502)
+            ->assertJsonPath('error.code', 'invalid_upstream_range');
+        Http::assertSentCount(1);
+    }
+
+    public function test_probe_rejects_an_inconsistent_content_length(): void
+    {
+        Http::fake([
+            '*' => Http::response(str_repeat('x', 50), 206, [
+                'Content-Type' => 'image/jpeg',
+                'Content-Length' => '50',
+                'Content-Range' => 'bytes 0-99/100',
+            ]),
+        ]);
+        $token = $this->app->make(DownloadAssetStore::class)->issue([
+            ...$this->asset(),
+            'expected_size' => null,
+        ]);
+
+        $this->getJson("/api/downloads/{$token}")
+            ->assertStatus(502)
+            ->assertJsonPath('error.code', 'invalid_upstream_range');
+        Http::assertSentCount(1);
+    }
+
+    public function test_probe_rejects_a_malformed_content_range(): void
+    {
+        Http::fake([
+            '*' => Http::response('x', 206, [
+                'Content-Type' => 'image/jpeg',
+                'Content-Length' => '1',
+                'Content-Range' => 'bytes 0-0/100;unsafe',
+            ]),
+        ]);
+        $token = $this->app->make(DownloadAssetStore::class)->issue([
+            ...$this->asset(),
+            'expected_size' => null,
+        ]);
+
+        $this->getJson("/api/downloads/{$token}")
+            ->assertStatus(502)
+            ->assertJsonPath('error.code', 'invalid_upstream_range');
+        Http::assertSentCount(1);
+    }
+
+    public function test_oversized_probe_does_not_start_the_full_download(): void
+    {
+        Http::fake([
+            '*' => Http::response(str_repeat('x', 1024), 206, [
+                'Content-Type' => 'image/jpeg',
+                'Content-Length' => '1024',
+                'Content-Range' => 'bytes 0-1023/2048',
+            ]),
+        ]);
+        $token = $this->app->make(DownloadAssetStore::class)->issue([
+            ...$this->asset(),
+            'expected_size' => null,
+        ]);
+
+        $this->getJson("/api/downloads/{$token}")
+            ->assertStatus(413)
+            ->assertJsonPath('error.code', 'media_too_large');
+        Http::assertSentCount(1);
+    }
+
+    public function test_full_response_probe_remains_compatible_when_it_has_a_safe_length(): void
+    {
+        Http::fakeSequence()
+            ->push('', 200, [
+                'Content-Type' => 'image/jpeg',
+                'Content-Length' => '8',
+            ])
+            ->push('complete', 200, [
+                'Content-Type' => 'image/jpeg',
+                'Content-Length' => '8',
+            ]);
+        $token = $this->app->make(DownloadAssetStore::class)->issue([
+            ...$this->asset(),
+            'expected_size' => null,
+        ]);
+
+        $response = $this->get("/api/downloads/{$token}");
+
+        $response->assertOk();
+        $this->assertSame('complete', $response->streamedContent());
+        Http::assertSentCount(2);
+    }
+
     public function test_known_size_full_download_does_not_probe(): void
     {
         Http::fake(function ($request) {
