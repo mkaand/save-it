@@ -121,8 +121,12 @@ YOUTUBE_VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
 YOUTUBE_SHORTS_PATH = re.compile(r"^/shorts/([A-Za-z0-9_-]{11})/?$")
 YOUTUBE_SHORT_URL_PATH = re.compile(r"^/([A-Za-z0-9_-]{11})/?$")
 LINKEDIN_POST_PATH = re.compile(r"^/posts/([^/]{3,600})/?$")
-LINKEDIN_URN_PATH = re.compile(r"^/feed/update/urn:li:(activity|ugcPost):([0-9]{6,30})/?$", re.IGNORECASE)
-LINKEDIN_URN_IN_SLUG = re.compile(r"(?:^|[-_])(activity|ugcPost)[-_:]([0-9]{6,30})(?:[-_]|$)", re.IGNORECASE)
+LINKEDIN_URN_PATH = re.compile(
+    r"^/feed/update/urn:li:(activity|ugcPost):([0-9]{6,30})/?$", re.IGNORECASE
+)
+LINKEDIN_URN_IN_SLUG = re.compile(
+    r"(?:^|[-_])(activity|ugcPost)[-_:]([0-9]{6,30})(?:[-_]|$)", re.IGNORECASE
+)
 LINKEDIN_SHORT_PATH = re.compile(r"^/(?:p/)?([A-Za-z0-9_-]{4,128})/?$")
 INVALID_PERCENT_ENCODING = re.compile(r"%(?![A-Fa-f0-9]{2})")
 
@@ -199,7 +203,9 @@ def _normalize_linkedin_url(hostname: str, parsed: SplitResult) -> str:
     if hostname == "lnkd.in":
         match = LINKEDIN_SHORT_PATH.fullmatch(parsed.path)
         if match is None:
-            raise UrlValidationError("invalid_linkedin_post_url", "LinkedIn supports public post URLs only.")
+            raise UrlValidationError(
+                "invalid_linkedin_post_url", "LinkedIn supports public post URLs only."
+            )
         prefix = "p/" if parsed.path.startswith("/p/") else ""
         return f"https://lnkd.in/{prefix}{match.group(1)}"
 

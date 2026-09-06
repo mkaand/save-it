@@ -20,8 +20,12 @@ class LinkedInProviderAdapter:
     async def extract(self, context: ProviderContext, request_id: str) -> ExtractResult:
         resolved_context = context
         if context.variant == "short":
-            resolved_context = classify_url(await self.client.resolve_short_link(context.normalized_url))
-            if resolved_context.provider is not Provider.LINKEDIN or resolved_context.variant == "short":
+            resolved_url = await self.client.resolve_short_link(context.normalized_url)
+            resolved_context = classify_url(resolved_url)
+            if (
+                resolved_context.provider is not Provider.LINKEDIN
+                or resolved_context.variant == "short"
+            ):
                 raise ProviderError(
                     "unsupported_url",
                     "LinkedIn Beta supports public post URLs only.",

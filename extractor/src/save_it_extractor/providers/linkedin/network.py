@@ -223,7 +223,10 @@ class LinkedInMetadataClient:
                     if hostname in METADATA_HOSTS:
                         return url
                     raise ProviderError(
-                        "disallowed_redirect", "LinkedIn returned an unsafe redirect.", 502, {"provider": "linkedin"}
+                        "disallowed_redirect",
+                        "LinkedIn returned an unsafe redirect.",
+                        502,
+                        {"provider": "linkedin"},
                     )
                 if redirect_count >= settings.linkedin_max_redirects:
                     raise ProviderError(
@@ -235,13 +238,17 @@ class LinkedInMetadataClient:
                 location = response.headers.get("location")
                 if not location:
                     raise ProviderError(
-                        "disallowed_redirect", "LinkedIn returned an unsafe redirect.", 502, {"provider": "linkedin"}
+                        "disallowed_redirect",
+                        "LinkedIn returned an unsafe redirect.",
+                        502,
+                        {"provider": "linkedin"},
                     )
                 url = urljoin(url, location)
                 if _is_auth_url(url):
                     raise ProviderError(
                         "authentication_required",
-                        "This LinkedIn post requires signing in and cannot be analyzed anonymously.",
+                        "This LinkedIn post requires signing in and cannot be analyzed "
+                        "anonymously.",
                         422,
                         {"provider": "linkedin"},
                     )

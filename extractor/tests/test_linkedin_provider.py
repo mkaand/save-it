@@ -146,7 +146,9 @@ def test_linkedin_short_links_are_classified_for_safe_resolution() -> None:
         ),
     ],
 )
-def test_linkedin_ugc_post_urls_preserve_urn_semantics(url: str, normalized: str, variant: str) -> None:
+def test_linkedin_ugc_post_urls_preserve_urn_semantics(
+    url: str, normalized: str, variant: str
+) -> None:
     context = classify_url(url)
     assert context.normalized_url == normalized
     assert context.variant == variant
