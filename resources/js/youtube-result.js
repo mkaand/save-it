@@ -85,13 +85,19 @@ export function normalizeYouTubeAudioFormats(value) {
 export function youtubeVideoFormatLabel(format) {
     const resolution = format.resolution || 'Video';
     const fps = format.fps ? ` · ${Math.round(format.fps)} fps` : '';
-    const merge = format.requiresMerge ? ' · audio merge needed' : ' · audio included';
+    const delivery = format.requiresMerge
+        ? ' · video and audio will be merged'
+        : (format.hasAudio ? ' · audio included' : ' · video only');
+    const codec = format.codecFamily === 'h264' ? 'H.264'
+        : (format.codecFamily === 'h265' ? 'H.265' : 'Compatible video');
 
-    return `${format.container.toUpperCase()} ${resolution} · ${format.codecFamily.toUpperCase()}${fps}${merge}`;
+    return `${format.container.toUpperCase()} ${resolution} · ${codec}${fps}${delivery}`;
 }
 
 export function youtubeAudioFormatLabel(format) {
     const bitrate = format.bitrate ? ` · ${Math.round(format.bitrate)} kbps` : '';
 
-    return `${format.container.toUpperCase()} · ${format.codec}${bitrate}`;
+    const codec = format.codec === 'mp4a.40.2' ? 'AAC-LC'
+        : (format.codec === 'mp4a.40.5' ? 'HE-AAC' : (format.codec.toLowerCase() === 'opus' ? 'Opus' : format.codec));
+    return `${format.container.toUpperCase()} · ${codec}${bitrate}`;
 }

@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <meta name="description" content="Analyze supported media URLs and preview planned download formats with Save It. No account required.">
+    <meta name="description" content="Analyze supported media URLs and securely download or prepare available formats with Save It. No account required.">
     <meta name="theme-color" content="#0b1220">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="Save It">
@@ -251,10 +251,10 @@
             <div class="shell">
                 <div class="section-heading compact-heading">
                     <div>
-                        <p class="eyebrow"><span></span> Analysis preview</p>
+                        <p class="eyebrow"><span></span> Media analysis</p>
                         <h2 id="result-heading">Your media plan</h2>
                     </div>
-                    <span class="preview-badge">Preview only</span>
+                    <span class="preview-badge">Secure delivery</span>
                 </div>
                 <div class="result-panel" data-result-panel></div>
             </div>
@@ -285,7 +285,7 @@
                 <ol class="steps-grid">
                     <li><span class="step-number">01</span><div><h3>Paste</h3><p>Add a recognized platform URL.</p></div></li>
                     <li><span class="step-number">02</span><div><h3>Analyze</h3><p>Validate it and prepare a safe preview.</p></div></li>
-                    <li><span class="step-number">03</span><div><h3>Choose</h3><p>Review planned formats. Downloads are not active yet.</p></div></li>
+                    <li><span class="step-number">03</span><div><h3>Choose</h3><p>Choose a format, then download or prepare your media securely.</p></div></li>
                 </ol>
             </div>
         </section>

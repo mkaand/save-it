@@ -19,6 +19,13 @@ function safeUrl(value, allowNull = false) {
     }
 }
 
+function safeSameOriginUrl(value) {
+    const url = safeUrl(value, true);
+    const origin = typeof window === 'undefined' ? null : window.location?.origin;
+
+    return url && origin && url.startsWith(origin) ? url : null;
+}
+
 export function normalizeRecentFetch(value, analyzedAt = new Date().toISOString()) {
     if (!value || typeof value !== 'object') {
         return null;
@@ -43,9 +50,9 @@ export function normalizeRecentFetch(value, analyzedAt = new Date().toISOString(
         author: typeof value.author === 'string' && value.author.trim()
             ? value.author.trim().slice(0, 160)
             : null,
-        thumbnailUrl: ['instagram', 'linkedin'].includes(value.platform)
-            ? null
-            : safeUrl(value.thumbnailUrl, true),
+        // Only a same-origin preview reference may survive in browser storage.
+        // Upstream/CDN media addresses and download delivery data are never persisted.
+        thumbnailUrl: safeSameOriginUrl(value.thumbnailUrl),
         analyzedAt: timestamp,
     };
 }

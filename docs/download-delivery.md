@@ -45,8 +45,10 @@ to prevent duplicate conversion or ZIP work.
 - emits `Accept-Ranges: bytes` only after validating a `206` response, a syntactically
   valid byte `Content-Range`, and a matching partial `Content-Length`; a full `200`
   response does not advertise unvalidated range support;
-- validates the media MIME, declared or range-total size, and maximum size; sources
-  with no safe declared or expected size fail closed;
+- validates the media MIME, declared or range-total size, and maximum size; when a
+  source omits `Content-Length`, it performs one bounded `bytes=0-0` probe and accepts
+  the total only from a valid `206 Content-Range`; sources that still omit safe size
+  metadata fail closed;
 - streams in 64 KiB chunks without loading the complete body into PHP memory;
 - stops reading and closes the upstream stream when the client disconnects;
 - emits a sanitized RFC 6266 `Content-Disposition` with ASCII and UTF-8 filenames;

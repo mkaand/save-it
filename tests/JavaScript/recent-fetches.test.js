@@ -151,7 +151,7 @@ test('stores minimal LinkedIn history without expiring asset URLs', () => {
     assert.equal(JSON.stringify(stored).includes('cookie'), false);
 });
 
-test('stores YouTube history without format or conversion payloads', () => {
+test('stores YouTube history without upstream thumbnails, formats, or conversion payloads', () => {
     const storage = new MemoryStorage();
     addRecentFetch(storage, {
         ...item(1, 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'),
@@ -168,7 +168,7 @@ test('stores YouTube history without format or conversion payloads', () => {
     assert.equal(stored.items[0].platform, 'youtube');
     assert.equal(
         stored.items[0].thumbnailUrl,
-        'https://i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg',
+        null,
     );
     assert.equal(stored.items[0].video_formats, undefined);
     assert.equal(stored.items[0].audio_formats, undefined);

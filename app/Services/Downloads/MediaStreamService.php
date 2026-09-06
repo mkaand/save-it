@@ -29,6 +29,10 @@ final class MediaStreamService
         $url = $this->requiredString($asset, 'upstream_url');
         $filename = $this->filename($this->requiredString($asset, 'filename'));
         $rangeHeader = $this->range($range);
+        $expected = is_int($asset['expected_size'] ?? null) ? $asset['expected_size'] : null;
+        if ($expected === null) {
+            $expected = $this->probeSize($url, $provider);
+        }
         $response = $this->request($url, $provider, $rangeHeader);
 
         if ($response->status() === 416) {
@@ -78,7 +82,6 @@ final class MediaStreamService
             );
         }
         $total = $contentRange['total'] ?? null;
-        $expected = is_int($asset['expected_size'] ?? null) ? $asset['expected_size'] : null;
         $limit = max(1, (int) config('services.downloads.max_file_bytes'));
         if (
             ($length !== null && $length > $limit)
@@ -189,6 +192,40 @@ final class MediaStreamService
             502,
             'The media source returned an unsafe redirect.',
         );
+    }
+
+    private function probeSize(string $url, string $provider): ?int
+    {
+        $response = $this->request($url, $provider, 'bytes=0-0');
+        try {
+            if (! in_array($response->status(), [200, 206], true)) {
+                return null;
+            }
+            $mime = strtolower(trim(explode(';', $response->header('Content-Type', ''))[0]));
+            if (! in_array($mime, self::MIME_TYPES, true)) {
+                throw new DownloadException(
+                    'unsupported_media_type',
+                    422,
+                    'The media source returned an unsupported file type.',
+                );
+            }
+            if ($response->status() === 206) {
+                $range = $this->contentRange($response);
+                $length = $this->positiveHeader($response, 'Content-Length');
+                if ($range === null || $length !== 1 || $range['start'] !== 0 || $range['end'] !== 0) {
+                    throw new DownloadException(
+                        'invalid_upstream_range',
+                        502,
+                        'The media source returned an invalid byte range response.',
+                    );
+                }
+                return $range['total'];
+            }
+
+            return $this->positiveHeader($response, 'Content-Length');
+        } finally {
+            $response->toPsrResponse()->getBody()->close();
+        }
     }
 
     private function range(?string $range): ?string

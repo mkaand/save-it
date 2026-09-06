@@ -198,6 +198,32 @@ class DownloadDeliveryTest extends TestCase
             ->assertJsonPath('error.code', 'media_too_large');
     }
 
+    public function test_proxy_uses_a_bounded_range_probe_when_an_asset_omits_content_length(): void
+    {
+        Http::fakeSequence()
+            ->push('x', 206, [
+                'Content-Type' => 'image/jpeg',
+                'Content-Length' => '1',
+                'Content-Range' => 'bytes 0-0/8',
+            ])
+            ->push('complete', 200, [
+                'Content-Type' => 'image/jpeg',
+            ]);
+        $token = $this->app->make(DownloadAssetStore::class)->issue([
+            ...$this->asset(),
+            'mime_type' => 'image/jpeg',
+            'filename' => 'preview.jpg',
+            'expected_size' => null,
+        ]);
+
+        $response = $this->get("/api/downloads/{$token}");
+
+        $response->assertOk()->assertHeader('Content-Type', 'image/jpeg');
+        $this->assertSame('complete', $response->streamedContent());
+        Http::assertSentCount(2);
+        Http::assertSent(static fn ($request): bool => $request->hasHeader('Range', 'bytes=0-0'));
+    }
+
     public function test_job_endpoint_dispatches_only_a_signed_supported_plan(): void
     {
         Bus::fake();
