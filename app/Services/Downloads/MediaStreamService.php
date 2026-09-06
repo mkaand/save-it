@@ -219,6 +219,7 @@ final class MediaStreamService
                         'The media source returned an invalid byte range response.',
                     );
                 }
+
                 return $range['total'];
             }
 
