@@ -30,7 +30,7 @@ final class MediaStreamService
         $filename = $this->filename($this->requiredString($asset, 'filename'));
         $rangeHeader = $this->range($range);
         $expected = is_int($asset['expected_size'] ?? null) ? $asset['expected_size'] : null;
-        if ($expected === null) {
+        if ($expected === null && $rangeHeader === null) {
             $expected = $this->probeSize($url, $provider);
         }
         $response = $this->request($url, $provider, $rangeHeader);
