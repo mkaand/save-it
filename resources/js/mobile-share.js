@@ -28,6 +28,23 @@ function sameOriginUrl(value) {
     }
 }
 
+function tokenFromDelivery(url) {
+    const match = /^\/api\/downloads\/([a-z0-9]{48}\.[a-f0-9]{64})$/.exec(url.pathname);
+
+    return match ? match[1] : null;
+}
+
+function sameOriginPreparationUrl(value) {
+    try {
+        const url = new URL(value, window.location.origin);
+        return url.origin === window.location.origin && /^\/api\/share-preparations\/[a-z0-9]{48}$/.test(url.pathname)
+            ? url
+            : null;
+    } catch {
+        return null;
+    }
+}
+
 export function canOfferMobileShare(output) {
     return Boolean(
         window.matchMedia?.('(pointer: coarse)').matches
@@ -77,9 +94,27 @@ export function sharedFilename(output, mime, disposition = null) {
 }
 
 export async function shareMedia(output) {
-    const url = sameOriginUrl(delivery(output));
+    let url = sameOriginUrl(delivery(output));
     if (!url) {
         throw new Error('This file is no longer available. Analyze the URL again.');
+    }
+    if (mediaType(output?.mime_type) === 'video/mp4') {
+        const token = tokenFromDelivery(url);
+        if (!token) {
+            throw new Error('This file is no longer available. Analyze the URL again.');
+        }
+        const preparation = await fetch('/api/share-preparations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ token }),
+        });
+        const data = await preparation.json().catch(() => null);
+        const preparedUrl = sameOriginPreparationUrl(data?.data?.url);
+        if (!preparation.ok || !preparedUrl || data?.data?.mime_type !== 'video/mp4') {
+            throw new Error('The file could not be prepared for sharing.');
+        }
+        url = preparedUrl;
+        output = { ...output, filename: data.data.filename, mime_type: data.data.mime_type };
     }
     const probe = await fetch(url, { headers: { Range: 'bytes=0-0' } });
     const range = probe.headers.get('content-range') || '';

@@ -1,5 +1,6 @@
 <?php
 
+use App\Services\Downloads\ShareMediaPreparationStore;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\File;
@@ -20,3 +21,8 @@ Schedule::call(function (): void {
         }
     }
 })->everyThirtyMinutes()->name('download-artifact-cleanup')->withoutOverlapping();
+
+Schedule::call(fn () => app(ShareMediaPreparationStore::class)->cleanupExpired())
+    ->everyThirtyMinutes()
+    ->name('share-preparation-cleanup')
+    ->withoutOverlapping();

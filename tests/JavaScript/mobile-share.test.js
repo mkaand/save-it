@@ -29,3 +29,7 @@ test('uses a safe Content-Disposition filename without duplicate extensions', ()
 test('sanitizes control characters and path separators in fallback labels', () => {
     assert.equal(sharedFilename({ label: 'bad/\\name\r\n' }, 'image/png'), 'bad-name.png');
 });
+
+test('keeps the safe MP4 extension when a prepared Share file supplies a filename', () => {
+    assert.equal(sharedFilename({ filename: 'Rick Astley.mp4' }, 'video/mp4'), 'Rick Astley.mp4');
+});
