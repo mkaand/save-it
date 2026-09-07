@@ -69,10 +69,52 @@ class RecentPreviewStoreTest extends TestCase
         (new RecentPreviewStore($this->policy($url)))->issue($this->asset($url));
     }
 
+    public function test_expired_orphans_are_cleaned_oldest_first_in_bounded_passes(): void
+    {
+        $directory = storage_path('app/private/recent-previews');
+        if (! is_dir($directory)) {
+            mkdir($directory, 0700, true);
+        }
+
+        $files = [];
+        for ($index = 0; $index < 26; $index++) {
+            $file = $directory.'/cleanup-test-'.str_pad((string) $index, 2, '0', STR_PAD_LEFT).'.jpg';
+            file_put_contents($file, 'orphan');
+            touch($file, time() - (2592000 + 100 + $index));
+            $files[] = $file;
+        }
+        $this->files = [...$this->files, ...$files];
+
+        $url = 'https://i.ytimg.com/vi/example/preview.png';
+        Http::fake([$url => fn () => Http::response($this->png(), 200, [
+            'Content-Type' => 'image/png',
+            'Content-Length' => (string) strlen($this->png()),
+        ])]);
+        $store = new RecentPreviewStore($this->permissivePolicy($url));
+        $first = $store->issue($this->asset($url));
+        $this->files[] = $store->resolve($first)['path'];
+
+        $this->assertFileDoesNotExist($files[25]);
+        $this->assertFileExists($files[0]);
+
+        $second = $store->issue($this->asset($url));
+        $this->files[] = $store->resolve($second)['path'];
+
+        $this->assertFileDoesNotExist($files[0]);
+    }
+
     private function policy(string $url): UpstreamUrlPolicy
     {
         $policy = Mockery::mock(UpstreamUrlPolicy::class);
         $policy->shouldReceive('validate')->once()->with($url, 'youtube')->andReturn($url);
+
+        return $policy;
+    }
+
+    private function permissivePolicy(string $url): UpstreamUrlPolicy
+    {
+        $policy = Mockery::mock(UpstreamUrlPolicy::class);
+        $policy->shouldReceive('validate')->zeroOrMoreTimes()->with($url, 'youtube')->andReturn($url);
 
         return $policy;
     }

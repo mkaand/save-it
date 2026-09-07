@@ -98,7 +98,7 @@ final class MediaUrlAnalyzer
                 ? "{$recognition->platform->label()} post by @{$handle}"
                 : "{$recognition->platform->label()} post");
         $publicAssets = $this->publicAssets($recognition, $title);
-        $publicThumbnail = $publicAssets[0]['preview_url'] ?? null;
+        $publicThumbnail = $this->durablePrimaryPreviewReference($recognition);
         $metadata['thumbnail_url'] = $publicThumbnail;
 
         return [
@@ -136,7 +136,7 @@ final class MediaUrlAnalyzer
         }
 
         $publicAssets = $this->publicAssets($recognition, $title);
-        $publicThumbnail = $publicAssets[0]['preview_url'] ?? null;
+        $publicThumbnail = $this->durablePrimaryPreviewReference($recognition);
         unset($metadata['captions_url']);
         $metadata['thumbnail_url'] = $publicThumbnail;
 
@@ -326,7 +326,7 @@ final class MediaUrlAnalyzer
         }
         $thumbnailUrl = null;
         if (is_string($metadata['thumbnail_url'] ?? null)) {
-            $thumbnailUrl = $this->previewReference([
+            $thumbnailUrl = $this->durablePreviewReference([
                 'version' => 1,
                 'mode' => 'proxy',
                 'provider' => 'youtube',
@@ -527,7 +527,7 @@ final class MediaUrlAnalyzer
             );
             $previewUrl = null;
             if (is_string($previewSource) && $previewSource !== '') {
-                $previewUrl = $this->previewReference([
+                $previewUrl = $this->ephemeralPreviewReference([
                     'version' => 1,
                     'mode' => 'proxy',
                     'provider' => $recognition->platform->value,
@@ -573,13 +573,58 @@ final class MediaUrlAnalyzer
     }
 
     /** @param array<string, mixed> $asset */
-    private function previewReference(array $asset): ?string
+    private function durablePrimaryPreviewReference(ExtractorRecognition $recognition): ?string
+    {
+        $asset = collect($recognition->assets)->first(
+            fn (array $candidate): bool => ($candidate['role'] ?? null) === 'primary',
+        ) ?? ($recognition->assets[0] ?? null);
+        if (! is_array($asset)) {
+            return null;
+        }
+
+        $previewSource = $asset['thumbnail_url'] ?? (
+            ($asset['type'] ?? null) === 'image' ? ($asset['url'] ?? null) : null
+        );
+        if (! is_string($previewSource) || $previewSource === '') {
+            return null;
+        }
+
+        return $this->durablePreviewReference([
+            'provider' => $recognition->platform->value,
+            'upstream_url' => $previewSource,
+        ]);
+    }
+
+    /** @param array<string, mixed> $asset */
+    private function durablePreviewReference(array $asset): ?string
     {
         try {
             return route('api.previews.show', ['preview' => $this->previews->issue($asset)], false);
         } catch (\Throwable) {
             return null;
         }
+    }
+
+    /** @param array<string, mixed> $asset */
+    private function ephemeralPreviewReference(array $asset): ?string
+    {
+        $url = $asset['upstream_url'] ?? null;
+        $provider = $asset['provider'] ?? null;
+        if (! is_string($url) || $url === '' || ! is_string($provider) || $provider === '') {
+            return null;
+        }
+
+        $token = $this->downloads->issue([
+            ...$asset,
+            'version' => 1,
+            'mode' => 'proxy',
+            'provider' => $provider,
+            'upstream_url' => $url,
+            'disposition' => 'inline',
+            'expected_size' => null,
+        ]);
+
+        return route('api.downloads.show', ['token' => $token], false);
     }
 
     /** @return array<string, mixed> */

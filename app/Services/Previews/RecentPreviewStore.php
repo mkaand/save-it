@@ -182,7 +182,18 @@ final class RecentPreviewStore
     private function cleanupExpired(): void
     {
         $cutoff = time() - self::TTL_SECONDS;
-        foreach (array_slice(glob($this->directory().DIRECTORY_SEPARATOR.'*') ?: [], 0, 25) as $file) {
+        $files = glob($this->directory().DIRECTORY_SEPARATOR.'*') ?: [];
+        usort($files, static function (string $left, string $right): int {
+            $leftTime = filemtime($left) ?: PHP_INT_MAX;
+            $rightTime = filemtime($right) ?: PHP_INT_MAX;
+
+            return $leftTime <=> $rightTime ?: strcmp($left, $right);
+        });
+
+        // Looking at the oldest entries first makes each bounded pass remove the
+        // next expired orphan instead of repeatedly inspecting an arbitrary glob
+        // prefix. New previews are never allowed to starve cleanup progress.
+        foreach (array_slice($files, 0, 25) as $file) {
             if (is_file($file) && filemtime($file) !== false && filemtime($file) < $cutoff) {
                 @unlink($file);
             }
