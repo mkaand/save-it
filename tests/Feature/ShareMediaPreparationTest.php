@@ -22,6 +22,10 @@ class ShareMediaPreparationTest extends TestCase
 
     public function test_share_preparation_strips_stream_creation_dates_without_changing_bitstreams_or_normal_download_source(): void
     {
+        if (! is_executable('/usr/bin/ffmpeg') || ! is_executable('/usr/bin/ffprobe')) {
+            $this->markTestSkipped('FFmpeg integration coverage runs in the Docker validation image.');
+        }
+
         $source = storage_path('app/private/downloads/ios-share-source-'.bin2hex(random_bytes(4)).'.mp4');
         File::ensureDirectoryExists(dirname($source), 0700, true);
         $this->createMp4Fixture($source);
@@ -71,7 +75,7 @@ class ShareMediaPreparationTest extends TestCase
         config(['services.downloads.share_max_file_bytes' => 1]);
         $source = storage_path('app/private/downloads/ios-share-too-large-'.bin2hex(random_bytes(4)).'.mp4');
         File::ensureDirectoryExists(dirname($source), 0700, true);
-        $this->createMp4Fixture($source);
+        file_put_contents($source, 'too-large');
         $this->paths[] = $source;
         $token = $this->app->make(DownloadAssetStore::class)->issue([
             'mode' => 'local_file', 'path' => $source, 'filename' => 'source.mp4', 'mime_type' => 'video/mp4',
