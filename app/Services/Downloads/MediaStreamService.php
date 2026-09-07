@@ -4,6 +4,7 @@ namespace App\Services\Downloads;
 
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 final class MediaStreamService
@@ -56,6 +57,7 @@ final class MediaStreamService
             );
         }
         if (! in_array($response->status(), [200, 206], true)) {
+            $this->logYouTubeFailure($provider, 'proxy_request', $rangeHeader, $response, 'youtube_upstream_http_status');
             throw new DownloadException(
                 'upstream_unavailable',
                 502,
@@ -65,6 +67,7 @@ final class MediaStreamService
 
         $mime = strtolower(trim(explode(';', $response->header('Content-Type', ''))[0]));
         if (! in_array($mime, self::MIME_TYPES, true)) {
+            $this->logYouTubeFailure($provider, 'proxy_content_type', $rangeHeader, $response, 'youtube_unsupported_media_type');
             throw new DownloadException(
                 'unsupported_media_type',
                 422,
@@ -231,6 +234,29 @@ final class MediaStreamService
             502,
             'The media source returned an unsafe redirect.',
         );
+    }
+
+    private function logYouTubeFailure(
+        string $provider,
+        string $stage,
+        ?string $range,
+        Response $response,
+        string $reason,
+    ): void {
+        if ($provider !== 'youtube') {
+            return;
+        }
+
+        Log::warning('youtube_media_delivery_failed', [
+            'provider' => $provider,
+            'pipeline_stage' => $stage,
+            'delivery_path' => 'proxy',
+            'upstream_status' => $response->status(),
+            'requested_range_class' => $range === null ? 'none' : 'single',
+            'content_range_classification' => $this->contentRange($response) === null ? 'none_or_invalid' : 'valid',
+            'content_length_present' => $response->header('Content-Length') !== null,
+            'failure_reason' => $reason,
+        ]);
     }
 
     private function probeSize(string $url, string $provider): ?int
