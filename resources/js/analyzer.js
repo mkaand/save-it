@@ -32,6 +32,7 @@ import {
     normalizeDownloadDelivery,
     normalizeJobStart,
     normalizeJobStatus,
+    responseJson,
 } from './download-delivery.js';
 import { canOfferMobileShare, shareMedia } from './mobile-share.js';
 
@@ -199,10 +200,10 @@ export function initAnalyzer() {
                 },
                 body: JSON.stringify({ token: delivery.token }),
             });
-            const startPayload = await started.json();
+            const startPayload = await responseJson(started);
             const statusUrl = normalizeJobStart(startPayload);
             if (!started.ok || !statusUrl) {
-                throw new Error(startPayload?.error?.message || 'The download could not be prepared.');
+                throw new Error(startPayload?.error?.message || downloadServiceError());
             }
 
             for (let attempt = 0; attempt < 180; attempt += 1) {
@@ -210,10 +211,10 @@ export function initAnalyzer() {
                 const response = await fetch(statusUrl, {
                     headers: { Accept: 'application/json' },
                 });
-                const payload = await response.json();
+                const payload = await responseJson(response);
                 const state = normalizeJobStatus(payload);
                 if (!response.ok) {
-                    throw new Error(payload?.error?.message || 'The download job expired.');
+                    throw new Error(payload?.error?.message || downloadServiceError());
                 }
                 if (!state) {
                     throw new Error('The download service returned an invalid status.');
@@ -235,6 +236,10 @@ export function initAnalyzer() {
             button.disabled = false;
             detail.textContent = output.detail;
         }
+    }
+
+    function downloadServiceError() {
+        return 'The download service could not complete this request. Please try again.';
     }
 
     function renderResult(data) {

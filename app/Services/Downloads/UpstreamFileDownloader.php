@@ -4,6 +4,7 @@ namespace App\Services\Downloads;
 
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 final class UpstreamFileDownloader
 {
@@ -38,6 +39,7 @@ final class UpstreamFileDownloader
                 }
                 $response = $this->request($url, $provider, "bytes={$written}-{$end}");
                 if (! in_array($response->status(), [200, 206], true)) {
+                    $this->logYouTubeFailure($provider, $response, 'youtube_upstream_http_status');
                     throw new DownloadException(
                         'upstream_unavailable',
                         502,
@@ -45,6 +47,7 @@ final class UpstreamFileDownloader
                     );
                 }
                 if ($response->status() === 200 && $written !== 0) {
+                    $this->logYouTubeFailure($provider, $response, 'youtube_range_ignored_on_later_chunk');
                     throw new DownloadException(
                         'upstream_unavailable',
                         502,
@@ -173,6 +176,24 @@ final class UpstreamFileDownloader
         );
 
         return is_int($length) ? $length : null;
+    }
+
+    private function logYouTubeFailure(string $provider, Response $response, string $reason): void
+    {
+        if ($provider !== 'youtube') {
+            return;
+        }
+
+        Log::warning('youtube_media_delivery_failed', [
+            'provider' => $provider,
+            'pipeline_stage' => 'job_source_download',
+            'delivery_path' => 'job',
+            'upstream_status' => $response->status(),
+            'requested_range_class' => 'single',
+            'content_range_classification' => $response->header('Content-Range') === null ? 'none_or_invalid' : 'present',
+            'content_length_present' => $response->header('Content-Length') !== null,
+            'failure_reason' => $reason,
+        ]);
     }
 
     /** @param resource $handle */

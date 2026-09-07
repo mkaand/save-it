@@ -5,6 +5,7 @@ import {
     normalizeDownloadDelivery,
     normalizeJobStart,
     normalizeJobStatus,
+    responseJson,
 } from '../../resources/js/download-delivery.js';
 
 const token = `${'a'.repeat(48)}.${'b'.repeat(64)}`;
@@ -67,4 +68,23 @@ test('normalizes bounded progress and rejects unsafe ready links', () => {
             download_url: 'https://example.com/file',
         },
     })?.downloadUrl, null);
+});
+
+test('returns null for non-JSON or malformed job service responses', async () => {
+    assert.equal(await responseJson({
+        headers: { get: () => 'text/html' },
+        json: async () => {
+            throw new Error('must not parse HTML');
+        },
+    }), null);
+    assert.equal(await responseJson({
+        headers: { get: () => 'application/json' },
+        json: async () => {
+            throw new Error('malformed JSON');
+        },
+    }), null);
+    assert.deepEqual(await responseJson({
+        headers: { get: () => 'application/json; charset=utf-8' },
+        json: async () => ({ data: { status: 'failed' } }),
+    }), { data: { status: 'failed' } });
 });
