@@ -101,6 +101,10 @@ class YouTubeMetadataClient:
             "simulate": True,
             "skip_download": True,
             "socket_timeout": settings.youtube_socket_timeout_seconds,
+            # The default web clients may expose formats whose Google Video Server
+            # requests require a Proof of Origin token. We do not use credentials
+            # or PO tokens, so prefer the anonymous progressive Android client.
+            "extractor_args": {"youtube": {"player_client": ["android"]}},
             "writesubtitles": False,
             "writeautomaticsub": False,
             "writethumbnail": False,

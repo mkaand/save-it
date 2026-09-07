@@ -254,6 +254,7 @@ def test_client_uses_library_api_without_download_cookie_proxy_or_shell(
     assert FakeYoutubeDL.options["noplaylist"] is True
     assert FakeYoutubeDL.options["cookiefile"] is None
     assert FakeYoutubeDL.options["proxy"] == ""
+    assert FakeYoutubeDL.options["extractor_args"] == {"youtube": {"player_client": ["android"]}}
     assert FakeYoutubeDL.options["js_runtimes"] == {}
     assert FakeYoutubeDL.options["remote_components"] == set()
 
