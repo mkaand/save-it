@@ -186,3 +186,23 @@ test('does not persist opaque Save It download tokens as thumbnails', () => {
     assert.equal(stored.items[0].thumbnailUrl, null);
     assert.equal(JSON.stringify(stored).includes('/api/downloads/'), false);
 });
+
+test('persists only opaque same-origin recent preview references across reloads', () => {
+    const storage = new MemoryStorage();
+    const preview = `/api/previews/${'a'.repeat(48)}`;
+
+    addRecentFetch(storage, { ...item(1), thumbnailUrl: preview });
+
+    const stored = storage.getItem(RECENT_FETCHES_KEY);
+    assert.equal(readRecentFetches(storage)[0].thumbnailUrl, preview);
+    assert.equal(stored.includes('googlevideo.com'), false);
+    assert.equal(stored.includes('cdninstagram.com'), false);
+    assert.equal(stored.includes('/api/downloads/'), false);
+});
+
+test('migrates older recent payloads without crashing', () => {
+    const storage = new MemoryStorage();
+    storage.setItem(RECENT_FETCHES_KEY, JSON.stringify({ version: 1, items: [item(1)] }));
+
+    assert.equal(readRecentFetches(storage).length, 1);
+});

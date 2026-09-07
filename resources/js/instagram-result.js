@@ -1,5 +1,5 @@
 const INSTAGRAM_ASSET_SUFFIX = '.cdninstagram.com';
-const LOCAL_MEDIA_PATH = /^\/api\/downloads\/[a-z0-9]{48}\.[a-f0-9]{64}$/;
+const LOCAL_MEDIA_PATH = /^\/api\/(?:downloads\/[a-z0-9]{48}\.[a-f0-9]{64}|previews\/[a-z0-9]{48})$/;
 
 export function safeInstagramMediaUrl(value) {
     if (typeof value !== 'string') {

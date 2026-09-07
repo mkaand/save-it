@@ -75,6 +75,27 @@ class ExtractorClientTest extends TestCase
             ->assertJsonPath('error.code', 'upstream_invalid_response');
     }
 
+    public function test_x_variant_outputs_keep_their_own_detail_metadata(): void
+    {
+        Http::fake(function (Request $request) {
+            $asset = self::videoAsset();
+            $asset['variants'] = [
+                [...$asset['variants'][0], 'quality_label' => '720×900', 'width' => 720, 'height' => 900],
+                [...$asset['variants'][0], 'quality_label' => '480×600', 'width' => 480, 'height' => 600, 'is_preferred' => false],
+                [...$asset['variants'][0], 'quality_label' => '320×400', 'width' => 320, 'height' => 400, 'is_preferred' => false],
+            ];
+
+            return Http::response($this->xSuccessResponse($request->data()['request_id'], 'video', [$asset]));
+        });
+
+        $response = $this->postJson('/api/analyze', ['url' => 'https://x.com/example/status/123'])
+            ->assertOk();
+
+        $this->assertSame('720×900 · secure proxy delivery', $response->json('data.outputs.0.detail'));
+        $this->assertSame('480×600 · secure proxy delivery', $response->json('data.outputs.1.detail'));
+        $this->assertSame('320×400 · secure proxy delivery', $response->json('data.outputs.2.detail'));
+    }
+
     public function test_no_media_maps_to_a_readable_validation_error(): void
     {
         Http::fake(function (Request $request) {
@@ -298,6 +319,12 @@ class ExtractorClientTest extends TestCase
         foreach ($response->json('data.outputs') as $output) {
             $this->assertTrue($output['available']);
         }
+        $this->assertSame('Image 1 of 2', $response->json('data.outputs.0.label'));
+        $this->assertSame('1080×1350 · secure proxy delivery', $response->json('data.outputs.0.detail'));
+        $this->assertSame('asset-1', $response->json('data.outputs.0.asset_id'));
+        $this->assertSame('Video 2 of 2', $response->json('data.outputs.1.label'));
+        $this->assertSame('1080×1350 · secure proxy delivery', $response->json('data.outputs.1.detail'));
+        $this->assertSame('asset-2', $response->json('data.outputs.1.asset_id'));
         $this->assertStringNotContainsString('cdninstagram.com', $response->getContent());
     }
 

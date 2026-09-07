@@ -90,7 +90,7 @@ class AnalyzeEndpointTest extends TestCase
             ->assertJsonPath('data.url', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ')
             ->assertJson(fn (AssertableJson $json) => $json
                 ->whereType('data.thumbnail_url', 'string')
-                ->where('data.thumbnail_url', fn (string $url): bool => str_starts_with($url, '/api/downloads/'))
+                ->where('data.thumbnail_url', fn (string $url): bool => preg_match('#^/api/previews/[a-z0-9]{48}$#', $url) === 1)
                 ->etc());
     }
 

@@ -1,4 +1,15 @@
 const MAX_SHARE_BYTES = 25 * 1024 * 1024;
+const EXTENSIONS = new Map([
+    ['video/mp4', 'mp4'],
+    ['video/webm', 'webm'],
+    ['audio/mp4', 'm4a'],
+    ['audio/m4a', 'm4a'],
+    ['audio/mpeg', 'mp3'],
+    ['audio/webm', 'webm'],
+    ['image/jpeg', 'jpg'],
+    ['image/png', 'png'],
+    ['image/webp', 'webp'],
+]);
 
 function delivery(output) {
     return output?.delivery === 'proxy' && typeof output.download_url === 'string'
@@ -27,6 +38,44 @@ export function canOfferMobileShare(output) {
     );
 }
 
+function mediaType(value) {
+    const mime = String(value || '').split(';', 1)[0].trim().toLowerCase();
+
+    return EXTENSIONS.has(mime) ? mime : null;
+}
+
+function headerFilename(value) {
+    if (typeof value !== 'string') {
+        return null;
+    }
+
+    const encoded = /filename\*=UTF-8''([^;]+)/i.exec(value)?.[1];
+    if (encoded) {
+        try {
+            return decodeURIComponent(encoded);
+        } catch {
+            return null;
+        }
+    }
+
+    return /filename="?([^";]+)"?/i.exec(value)?.[1] || null;
+}
+
+export function sharedFilename(output, mime, disposition = null) {
+    const extension = EXTENSIONS.get(mediaType(mime)) || 'bin';
+    const candidate = headerFilename(disposition) || output?.filename || output?.label || 'save-it-media';
+    const stem = String(candidate)
+        .replace(/\.\.([\\/]|$)/g, '')
+        .replace(/[\\/\u0000-\u001F\u007F]+/g, '-')
+        .replace(/\.[A-Za-z0-9]{1,8}$/u, '')
+        .replace(/[^A-Za-z0-9._ -]+/g, '-')
+        .replace(/[. -]+$/u, '')
+        .trim()
+        .slice(0, 100) || 'save-it-media';
+
+    return `${stem}.${extension}`;
+}
+
 export async function shareMedia(output) {
     const url = sameOriginUrl(delivery(output));
     if (!url) {
@@ -45,11 +94,12 @@ export async function shareMedia(output) {
         throw new Error('The file could not be prepared for sharing.');
     }
     const blob = await response.blob();
+    const mime = mediaType(response.headers.get('content-type')) || mediaType(blob.type);
     if (blob.size !== size || blob.size > MAX_SHARE_BYTES) {
         throw new Error('The file could not be prepared for sharing.');
     }
-    const file = new File([blob], `${String(output.label || 'save-it-media').replace(/[^A-Za-z0-9._ -]/g, '-')}`, {
-        type: blob.type || 'application/octet-stream',
+    const file = new File([blob], sharedFilename(output, mime || blob.type, response.headers.get('content-disposition')), {
+        type: mime || mediaType(blob.type) || 'application/octet-stream',
     });
     if (navigator.canShare && !navigator.canShare({ files: [file] })) {
         throw new Error('Sharing is not available for this file on this device.');

@@ -140,6 +140,7 @@ export function initAnalyzer() {
     const form = card.querySelector('[data-analyzer-form]');
     const input = card.querySelector('[data-url-input]');
     const pasteButton = card.querySelector('[data-paste-button]');
+    const clearInputButton = card.querySelector('[data-clear-input]');
     const submitButton = card.querySelector('[data-analyze-button]');
     const submitLabel = card.querySelector('[data-analyze-label]');
     const status = card.querySelector('[data-analyzer-status]');
@@ -170,6 +171,7 @@ export function initAnalyzer() {
         submitButton.disabled = loading;
         input.disabled = loading;
         pasteButton.disabled = loading;
+        clearInputButton.disabled = loading;
         submitLabel.textContent = loading ? 'Analyzing…' : 'Analyze URL';
     }
 
@@ -375,6 +377,20 @@ export function initAnalyzer() {
         }
 
         data.outputs.forEach((output) => {
+            const outputCard = element('article', 'output-card');
+            outputCard.dataset.outputId = output.id;
+            const asset = typeof output.asset_id === 'string'
+                ? assets.find((candidate) => candidate.id === output.asset_id)
+                : null;
+            if (asset) {
+                outputCard.append(thumbnail(
+                    asset.thumbnailUrl,
+                    output.label,
+                    'output-card-preview',
+                    { width: asset.width, height: asset.height },
+                ));
+            }
+            const outputBody = element('div', 'output-card-body');
             const button = element('button', 'output-option');
             button.type = 'button';
             button.disabled = !output.available;
@@ -392,7 +408,9 @@ export function initAnalyzer() {
             if (output.available) {
                 button.addEventListener('click', () => startDownload(output, button));
             }
-            outputs.append(button);
+            outputBody.append(button);
+            const actions = element('div', 'output-actions');
+            actions.append(button);
             if (canOfferMobileShare(output)) {
                 const share = element('button', 'output-share', 'Share / Save');
                 share.type = 'button';
@@ -406,8 +424,11 @@ export function initAnalyzer() {
                         share.disabled = false;
                     }
                 });
-                outputs.append(share);
+                actions.append(share);
             }
+            outputBody.replaceChildren(actions);
+            outputCard.append(outputBody);
+            outputs.append(outputCard);
         });
 
         copy.prepend(meta, title, url);
@@ -541,6 +562,13 @@ export function initAnalyzer() {
             setError();
             setStatus('Ready when you are.');
         }
+    });
+
+    clearInputButton.addEventListener('click', () => {
+        input.value = '';
+        setError();
+        setStatus('Ready when you are.');
+        input.focus();
     });
 
     if (navigator.clipboard?.readText) {

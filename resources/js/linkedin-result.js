@@ -1,5 +1,5 @@
 const LINKEDIN_ASSET_SUFFIX = '.licdn.com';
-const LOCAL_MEDIA_PATH = /^\/api\/downloads\/[a-z0-9]{48}\.[a-f0-9]{64}$/;
+const LOCAL_MEDIA_PATH = /^\/api\/(?:downloads\/[a-z0-9]{48}\.[a-f0-9]{64}|previews\/[a-z0-9]{48})$/;
 
 export function safeLinkedInMediaUrl(value) {
     if (typeof value !== 'string') {
