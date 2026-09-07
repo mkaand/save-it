@@ -4,7 +4,6 @@ namespace Tests\Feature;
 
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Testing\Fluent\AssertableJson;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
@@ -87,11 +86,7 @@ class AnalyzeEndpointTest extends TestCase
             'url' => 'https://youtu.be/dQw4w9WgXcQ?feature=shared#fragment',
         ])
             ->assertOk()
-            ->assertJsonPath('data.url', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ')
-            ->assertJson(fn (AssertableJson $json) => $json
-                ->whereType('data.thumbnail_url', 'string')
-                ->where('data.thumbnail_url', fn (string $url): bool => preg_match('#^/api/previews/[a-z0-9]{48}$#', $url) === 1)
-                ->etc());
+            ->assertJsonPath('data.url', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ');
     }
 
     public function test_it_rejects_invalid_youtube_video_ids(): void

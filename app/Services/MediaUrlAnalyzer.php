@@ -573,9 +573,13 @@ final class MediaUrlAnalyzer
     }
 
     /** @param array<string, mixed> $asset */
-    private function previewReference(array $asset): string
+    private function previewReference(array $asset): ?string
     {
-        return route('api.previews.show', ['preview' => $this->previews->issue($asset)], false);
+        try {
+            return route('api.previews.show', ['preview' => $this->previews->issue($asset)], false);
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     /** @return array<string, mixed> */

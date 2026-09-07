@@ -3,21 +3,16 @@
 namespace App\Http\Controllers\Previews;
 
 use App\Http\Controllers\Controller;
-use App\Services\Downloads\DownloadException;
-use App\Services\Downloads\MediaStreamService;
 use App\Services\Previews\RecentPreviewStore;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
-use Symfony\Component\HttpFoundation\StreamedResponse;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 final class RecentPreviewController extends Controller
 {
     public function __invoke(
         string $preview,
-        Request $request,
         RecentPreviewStore $store,
-        MediaStreamService $streamer,
-    ): StreamedResponse|JsonResponse {
+    ): BinaryFileResponse|JsonResponse {
         $asset = $store->resolve($preview);
 
         if ($asset === null) {
@@ -26,12 +21,10 @@ final class RecentPreviewController extends Controller
             ], 410);
         }
 
-        try {
-            return $streamer->stream($asset, $request->header('Range'));
-        } catch (DownloadException $exception) {
-            return response()->json([
-                'error' => ['message' => 'This preview could not be loaded.'],
-            ], $exception->httpStatus, $exception->headers);
-        }
+        return response()->file($asset['path'], [
+            'Content-Type' => $asset['mime_type'],
+            'Cache-Control' => 'private, no-store',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
     }
 }
