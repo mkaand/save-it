@@ -68,6 +68,13 @@ test('rejects unsafe LinkedIn media URL variants', () => {
     assert.equal(safeLinkedInMediaUrl('javascript:alert(1)'), null);
 });
 
+test('accepts opaque same-origin persistent preview references', () => {
+    const preview = `/api/previews/${'e'.repeat(48)}`;
+    assert.equal(normalizeLinkedInAssets([{
+        id: 'image', order: 1, type: 'image', preview_url: preview, width: 1, height: 1, variants: [],
+    }])[0].thumbnailUrl, preview);
+});
+
 test('handles missing metadata and corrupt assets without throwing', () => {
     assert.equal(linkedinAuthor(null), null);
     assert.equal(linkedinAuthor({ author_name: ' Example Organization ' }), 'Example Organization');

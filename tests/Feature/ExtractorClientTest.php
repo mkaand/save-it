@@ -2,9 +2,12 @@
 
 namespace Tests\Feature;
 
+use App\Services\Downloads\UpstreamUrlPolicy;
+use App\Services\Previews\RecentPreviewStore;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
+use Mockery;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
@@ -73,6 +76,27 @@ class ExtractorClientTest extends TestCase
         $this->postJson('/api/analyze', ['url' => 'https://x.com/example/status/123'])
             ->assertStatus(502)
             ->assertJsonPath('error.code', 'upstream_invalid_response');
+    }
+
+    public function test_x_variant_outputs_keep_their_own_detail_metadata(): void
+    {
+        Http::fake(function (Request $request) {
+            $asset = self::videoAsset();
+            $asset['variants'] = [
+                [...$asset['variants'][0], 'quality_label' => '720×900', 'width' => 720, 'height' => 900],
+                [...$asset['variants'][0], 'quality_label' => '480×600', 'width' => 480, 'height' => 600, 'is_preferred' => false],
+                [...$asset['variants'][0], 'quality_label' => '320×400', 'width' => 320, 'height' => 400, 'is_preferred' => false],
+            ];
+
+            return Http::response($this->xSuccessResponse($request->data()['request_id'], 'video', [$asset]));
+        });
+
+        $response = $this->postJson('/api/analyze', ['url' => 'https://x.com/example/status/123'])
+            ->assertOk();
+
+        $this->assertSame('720×900 · secure proxy delivery', $response->json('data.outputs.0.detail'));
+        $this->assertSame('480×600 · secure proxy delivery', $response->json('data.outputs.1.detail'));
+        $this->assertSame('320×400 · secure proxy delivery', $response->json('data.outputs.2.detail'));
     }
 
     public function test_no_media_maps_to_a_readable_validation_error(): void
@@ -298,7 +322,85 @@ class ExtractorClientTest extends TestCase
         foreach ($response->json('data.outputs') as $output) {
             $this->assertTrue($output['available']);
         }
+        $this->assertSame('Image 1 of 2', $response->json('data.outputs.0.label'));
+        $this->assertSame('1080×1350 · secure proxy delivery', $response->json('data.outputs.0.detail'));
+        $this->assertSame('asset-1', $response->json('data.outputs.0.asset_id'));
+        $this->assertSame('Video 2 of 2', $response->json('data.outputs.1.label'));
+        $this->assertSame('1080×1350 · secure proxy delivery', $response->json('data.outputs.1.detail'));
+        $this->assertSame('asset-2', $response->json('data.outputs.1.asset_id'));
+        $this->assertMatchesRegularExpression(
+            '#^/api/downloads/[a-z0-9]{48}\.[a-f0-9]{64}$#',
+            (string) $response->json('data.assets.0.preview_url'),
+        );
+        $this->assertMatchesRegularExpression(
+            '#^/api/downloads/[a-z0-9]{48}\.[a-f0-9]{64}$#',
+            (string) $response->json('data.assets.1.preview_url'),
+        );
         $this->assertStringNotContainsString('cdninstagram.com', $response->getContent());
+    }
+
+    public function test_carousel_uses_one_durable_recent_preview_and_ephemeral_asset_previews(): void
+    {
+        $assets = array_map(
+            fn (int $order): array => self::instagramAsset('image', $order),
+            range(1, 10),
+        );
+        $primaryPreview = $assets[0]['thumbnail_url'];
+        $policy = Mockery::mock(UpstreamUrlPolicy::class);
+        $policy->shouldReceive('validate')->once()->with($primaryPreview, 'instagram')->andReturn($primaryPreview);
+        $this->app->instance(UpstreamUrlPolicy::class, $policy);
+
+        Http::fake(function (Request $request) use ($assets) {
+            if ($request->method() === 'POST') {
+                return Http::response([
+                    'data' => [
+                        'request_id' => $request->data()['request_id'],
+                        'provider' => 'instagram',
+                        'provider_label' => 'Instagram',
+                        'provider_variant' => 'post',
+                        'media_type' => 'carousel',
+                        'source_url' => 'https://instagram.com/p/Code123/',
+                        'normalized_url' => 'https://www.instagram.com/p/Code123/',
+                        'status' => 'ready',
+                        'provider_maturity' => null,
+                        'warnings' => [],
+                        'metadata' => [
+                            'caption' => 'Carousel',
+                            'thumbnail_url' => $assets[0]['thumbnail_url'],
+                            'media_count' => count($assets),
+                        ],
+                        'assets' => $assets,
+                        'capabilities' => ['metadata', 'media_assets', 'multiple_assets'],
+                    ],
+                ]);
+            }
+
+            $png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL6xQAAAABJRU5ErkJggg==', true);
+
+            return Http::response($png, 200, [
+                'Content-Type' => 'image/png',
+                'Content-Length' => (string) strlen((string) $png),
+            ]);
+        });
+
+        $response = $this->postJson('/api/analyze', ['url' => 'https://instagram.com/p/Code123/'])
+            ->assertOk()
+            ->assertJsonCount(10, 'data.assets');
+
+        $this->assertMatchesRegularExpression('#^/api/previews/[a-z0-9]{48}$#', (string) $response->json('data.thumbnail_url'));
+        foreach ($response->json('data.assets') as $asset) {
+            $this->assertMatchesRegularExpression(
+                '#^/api/downloads/[a-z0-9]{48}\.[a-f0-9]{64}$#',
+                (string) $asset['preview_url'],
+            );
+        }
+        Http::assertSentCount(2);
+
+        $identifier = basename((string) $response->json('data.thumbnail_url'));
+        $cached = app(RecentPreviewStore::class)->resolve($identifier);
+        if (is_array($cached)) {
+            @unlink($cached['path']);
+        }
     }
 
     public function test_linkedin_extraction_maps_to_safe_public_response(): void

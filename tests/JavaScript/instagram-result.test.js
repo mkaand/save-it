@@ -63,6 +63,13 @@ test('rejects attacker suffixes, custom ports, and non-HTTPS URLs', () => {
     );
 });
 
+test('accepts opaque same-origin persistent preview references', () => {
+    const preview = `/api/previews/${'c'.repeat(48)}`;
+    assert.equal(normalizeInstagramAssets([{
+        id: 'image', order: 1, type: 'image', preview_url: preview, width: 1, height: 1, variants: [],
+    }])[0].thumbnailUrl, preview);
+});
+
 test('corrupt asset data is dropped without throwing', () => {
     assert.deepEqual(normalizeInstagramAssets(null), []);
     const [sanitizedVideo] = normalizeInstagramAssets([{

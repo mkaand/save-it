@@ -6,12 +6,14 @@ use App\Enums\MediaPlatform;
 use App\Services\Downloads\DownloadAssetStore;
 use App\Services\Extractor\ExtractorClient;
 use App\Services\Extractor\ExtractorRecognition;
+use App\Services\Previews\RecentPreviewStore;
 
 final class MediaUrlAnalyzer
 {
     public function __construct(
         private readonly ExtractorClient $extractor,
         private readonly DownloadAssetStore $downloads,
+        private readonly RecentPreviewStore $previews,
     ) {}
 
     /**
@@ -96,7 +98,7 @@ final class MediaUrlAnalyzer
                 ? "{$recognition->platform->label()} post by @{$handle}"
                 : "{$recognition->platform->label()} post");
         $publicAssets = $this->publicAssets($recognition, $title);
-        $publicThumbnail = $publicAssets[0]['preview_url'] ?? null;
+        $publicThumbnail = $this->durablePrimaryPreviewReference($recognition);
         $metadata['thumbnail_url'] = $publicThumbnail;
 
         return [
@@ -134,7 +136,7 @@ final class MediaUrlAnalyzer
         }
 
         $publicAssets = $this->publicAssets($recognition, $title);
-        $publicThumbnail = $publicAssets[0]['preview_url'] ?? null;
+        $publicThumbnail = $this->durablePrimaryPreviewReference($recognition);
         unset($metadata['captions_url']);
         $metadata['thumbnail_url'] = $publicThumbnail;
 
@@ -324,7 +326,7 @@ final class MediaUrlAnalyzer
         }
         $thumbnailUrl = null;
         if (is_string($metadata['thumbnail_url'] ?? null)) {
-            $previewToken = $this->downloads->issue([
+            $thumbnailUrl = $this->durablePreviewReference([
                 'version' => 1,
                 'mode' => 'proxy',
                 'provider' => 'youtube',
@@ -339,7 +341,6 @@ final class MediaUrlAnalyzer
                 'disposition' => 'inline',
                 'expected_size' => null,
             ]);
-            $thumbnailUrl = route('api.downloads.show', ['token' => $previewToken], false);
         }
 
         return [
@@ -381,11 +382,14 @@ final class MediaUrlAnalyzer
     /**
      * @param  array<string, mixed>  $asset
      */
-    private function assetDetail(array $asset): string
+    private function assetDetail(array $asset, array $source): string
     {
-        $preferred = collect($asset['variants'] ?? [])->firstWhere('is_preferred', true);
-        if (is_array($preferred) && is_string($preferred['quality_label'] ?? null)) {
-            return "{$preferred['quality_label']} · secure proxy delivery";
+        if (is_string($source['quality_label'] ?? null) && $source['quality_label'] !== '') {
+            return "{$source['quality_label']} · secure proxy delivery";
+        }
+
+        if (is_int($source['width'] ?? null) && is_int($source['height'] ?? null)) {
+            return "{$source['width']}×{$source['height']} · secure proxy delivery";
         }
 
         if (is_int($asset['width'] ?? null) && is_int($asset['height'] ?? null)) {
@@ -401,6 +405,7 @@ final class MediaUrlAnalyzer
     private function assetOutputs(ExtractorRecognition $recognition, string $title): array
     {
         $outputs = [];
+        $assetCount = count($recognition->assets);
         foreach ($recognition->assets as $asset) {
             $variants = is_array($asset['variants'] ?? null) ? $asset['variants'] : [];
             $sources = $variants !== []
@@ -423,13 +428,24 @@ final class MediaUrlAnalyzer
                 if ($mime === 'application/x-mpegURL') {
                     continue;
                 }
-                $label = is_string($source['quality_label'] ?? null)
-                    ? $source['quality_label']
-                    : match ($asset['type']) {
-                        'image' => 'Original image',
-                        'animated_gif' => 'Animated GIF video',
-                        default => 'Video',
-                    };
+                $label = $assetCount > 1
+                    ? sprintf(
+                        '%s %d of %d',
+                        match ($asset['type']) {
+                            'image' => 'Image',
+                            'animated_gif' => 'Animated GIF video',
+                            default => 'Video',
+                        },
+                        $asset['order'],
+                        $assetCount,
+                    )
+                    : (is_string($source['quality_label'] ?? null)
+                        ? $source['quality_label']
+                        : match ($asset['type']) {
+                            'image' => 'Original image',
+                            'animated_gif' => 'Animated GIF video',
+                            default => 'Video',
+                        });
                 $token = $this->downloads->issue([
                     'version' => 1,
                     'mode' => 'proxy',
@@ -445,8 +461,11 @@ final class MediaUrlAnalyzer
                 $outputs[] = [
                     'id' => $asset['id'].'-'.($variantIndex + 1),
                     'label' => $label,
-                    'detail' => $this->assetDetail($asset),
+                    'detail' => $this->assetDetail($asset, $source),
                     'available' => true,
+                    'asset_id' => $asset['id'],
+                    'asset_order' => $asset['order'],
+                    'asset_type' => $asset['type'],
                     'delivery' => 'proxy',
                     'download_url' => route('api.downloads.show', ['token' => $token], false),
                     'expires_in' => (int) config('services.downloads.token_ttl_seconds'),
@@ -508,7 +527,7 @@ final class MediaUrlAnalyzer
             );
             $previewUrl = null;
             if (is_string($previewSource) && $previewSource !== '') {
-                $token = $this->downloads->issue([
+                $previewUrl = $this->ephemeralPreviewReference([
                     'version' => 1,
                     'mode' => 'proxy',
                     'provider' => $recognition->platform->value,
@@ -521,7 +540,6 @@ final class MediaUrlAnalyzer
                     'disposition' => 'inline',
                     'expected_size' => null,
                 ]);
-                $previewUrl = route('api.downloads.show', ['token' => $token], false);
             }
 
             return [
@@ -552,6 +570,61 @@ final class MediaUrlAnalyzer
                 ),
             ];
         }, $recognition->assets);
+    }
+
+    /** @param array<string, mixed> $asset */
+    private function durablePrimaryPreviewReference(ExtractorRecognition $recognition): ?string
+    {
+        $asset = collect($recognition->assets)->first(
+            fn (array $candidate): bool => ($candidate['role'] ?? null) === 'primary',
+        ) ?? ($recognition->assets[0] ?? null);
+        if (! is_array($asset)) {
+            return null;
+        }
+
+        $previewSource = $asset['thumbnail_url'] ?? (
+            ($asset['type'] ?? null) === 'image' ? ($asset['url'] ?? null) : null
+        );
+        if (! is_string($previewSource) || $previewSource === '') {
+            return null;
+        }
+
+        return $this->durablePreviewReference([
+            'provider' => $recognition->platform->value,
+            'upstream_url' => $previewSource,
+        ]);
+    }
+
+    /** @param array<string, mixed> $asset */
+    private function durablePreviewReference(array $asset): ?string
+    {
+        try {
+            return route('api.previews.show', ['preview' => $this->previews->issue($asset)], false);
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /** @param array<string, mixed> $asset */
+    private function ephemeralPreviewReference(array $asset): ?string
+    {
+        $url = $asset['upstream_url'] ?? null;
+        $provider = $asset['provider'] ?? null;
+        if (! is_string($url) || $url === '' || ! is_string($provider) || $provider === '') {
+            return null;
+        }
+
+        $token = $this->downloads->issue([
+            ...$asset,
+            'version' => 1,
+            'mode' => 'proxy',
+            'provider' => $provider,
+            'upstream_url' => $url,
+            'disposition' => 'inline',
+            'expected_size' => null,
+        ]);
+
+        return route('api.downloads.show', ['token' => $token], false);
     }
 
     /** @return array<string, mixed> */

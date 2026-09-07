@@ -179,6 +179,7 @@
                                 data-url-input
                             >
                             <button class="paste-button" type="button" hidden data-paste-button>Paste</button>
+                            <button class="clear-input-button" type="button" data-clear-input>Clear</button>
                         </div>
                         <p class="field-help" id="url-help">Use an HTTP or HTTPS link from the platform roadmap.</p>
                         <p class="field-error" id="url-error" role="alert" data-url-error hidden></p>

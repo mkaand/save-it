@@ -1,5 +1,5 @@
 export const RECENT_FETCHES_KEY = 'save-it.recent-fetches.v1';
-export const RECENT_FETCHES_VERSION = 1;
+export const RECENT_FETCHES_VERSION = 2;
 export const RECENT_FETCHES_LIMIT = 5;
 
 function safeUrl(value, allowNull = false) {
@@ -20,10 +20,27 @@ function safeUrl(value, allowNull = false) {
 }
 
 function safeSameOriginUrl(value) {
-    const url = safeUrl(value, true);
-    const origin = typeof window === 'undefined' ? null : window.location?.origin;
+    if (typeof value !== 'string') {
+        return null;
+    }
 
-    return url && origin && url.startsWith(origin) ? url : null;
+    if (/^\/api\/previews\/[a-z0-9]{48}$/.test(value)) {
+        return value;
+    }
+
+    if (typeof window === 'undefined' || !window.location?.origin) {
+        return null;
+    }
+
+    try {
+        const url = new URL(value, window.location.origin);
+
+        return url.origin === window.location.origin && /^\/api\/previews\/[a-z0-9]{48}$/.test(url.pathname)
+            ? url.pathname
+            : null;
+    } catch {
+        return null;
+    }
 }
 
 export function normalizeRecentFetch(value, analyzedAt = new Date().toISOString()) {
@@ -71,7 +88,7 @@ export function readRecentFetches(storage) {
 
         const payload = JSON.parse(raw);
 
-        if (payload?.version !== RECENT_FETCHES_VERSION || !Array.isArray(payload.items)) {
+        if (![1, RECENT_FETCHES_VERSION].includes(payload?.version) || !Array.isArray(payload.items)) {
             storage.removeItem(RECENT_FETCHES_KEY);
             return [];
         }

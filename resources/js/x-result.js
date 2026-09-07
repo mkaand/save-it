@@ -1,6 +1,6 @@
 const MEDIA_HOSTS = new Set(['pbs.twimg.com', 'video.twimg.com']);
 const IMAGE_HOSTS = new Set(['pbs.twimg.com', 'i.ytimg.com']);
-const LOCAL_MEDIA_PATH = /^\/api\/downloads\/[a-z0-9]{48}\.[a-f0-9]{64}$/;
+const LOCAL_MEDIA_PATH = /^\/api\/(?:downloads\/[a-z0-9]{48}\.[a-f0-9]{64}|previews\/[a-z0-9]{48})$/;
 
 function safeUrl(value, hosts) {
     if (typeof value !== 'string') {

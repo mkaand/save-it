@@ -74,6 +74,7 @@ test('rejects attacker suffixes, custom ports, and non-HTTPS media URLs', () => 
     assert.equal(safeXMediaUrl('https://video.twimg.com:8443/video.mp4'), null);
     assert.equal(safeXMediaUrl('http://video.twimg.com/video.mp4'), null);
     assert.equal(safeResultImageUrl('https://pbs.twimg.com/image.jpg'), 'https://pbs.twimg.com/image.jpg');
+    assert.equal(safeResultImageUrl(`/api/previews/${'a'.repeat(48)}`), `/api/previews/${'a'.repeat(48)}`);
 });
 
 test('drops malformed and unsupported assets without throwing', () => {
