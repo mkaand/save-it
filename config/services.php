@@ -51,6 +51,11 @@ return [
         'max_zip_assets' => (int) env('DOWNLOAD_MAX_ZIP_ASSETS', 20),
         'max_zip_bytes' => (int) env('DOWNLOAD_MAX_ZIP_BYTES', 1073741824),
         'job_timeout_seconds' => (int) env('DOWNLOAD_JOB_TIMEOUT_SECONDS', 900),
+        // Web Share buffers media in the browser, so keep its server-side
+        // preparation bounded independently from normal downloads.
+        'share_max_file_bytes' => 52_428_800,
+        'share_preparation_ttl_seconds' => 600,
+        'share_ffmpeg_binary' => '/usr/bin/ffmpeg',
     ],
 
     'umami' => [

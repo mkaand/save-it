@@ -19,6 +19,7 @@ for directory in \
     "$app_root/storage" \
     "$app_root/storage/app" \
     "$app_root/storage/app/private" \
+    "$app_root/storage/app/private/share-preparations" \
     "$app_root/storage/app/public" \
     "$app_root/storage/framework" \
     "$app_root/storage/framework/cache" \

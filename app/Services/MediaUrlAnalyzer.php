@@ -237,6 +237,7 @@ final class MediaUrlAnalyzer
                 'id' => "youtube-video-{$format['format_id']}",
                 'label' => strtoupper((string) $format['container'])." {$resolution}",
                 'detail' => "{$codec}{$merge}",
+                'mime_type' => $payload['mime_type'],
                 'available' => true,
                 ...$this->delivery($mode, $token),
             ];
@@ -265,6 +266,7 @@ final class MediaUrlAnalyzer
                 'id' => "youtube-audio-{$format['format_id']}",
                 'label' => strtoupper((string) $format['container']).' audio',
                 'detail' => "{$format['audio_codec']}{$bitrate}",
+                'mime_type' => $format['container'] === 'm4a' ? 'audio/mp4' : 'audio/webm',
                 'available' => true,
                 ...$this->delivery('youtube_direct', $token),
             ];
@@ -320,6 +322,7 @@ final class MediaUrlAnalyzer
                 'id' => 'youtube-thumbnail',
                 'label' => 'Thumbnail',
                 'detail' => 'Original preview image',
+                'mime_type' => 'image/jpeg',
                 'available' => true,
                 ...$this->delivery('proxy', $token),
             ];
@@ -466,6 +469,7 @@ final class MediaUrlAnalyzer
                     'asset_id' => $asset['id'],
                     'asset_order' => $asset['order'],
                     'asset_type' => $asset['type'],
+                    'mime_type' => $mime,
                     'delivery' => 'proxy',
                     'download_url' => route('api.downloads.show', ['token' => $token], false),
                     'expires_in' => (int) config('services.downloads.token_ttl_seconds'),

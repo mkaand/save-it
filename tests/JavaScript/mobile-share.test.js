@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { sharedFilename } from '../../resources/js/mobile-share.js';
+import { MAX_SHARE_BYTES, sharedFilename } from '../../resources/js/mobile-share.js';
+
+test('keeps the Web Share preparation limit at 50 MiB', () => {
+    assert.equal(MAX_SHARE_BYTES, 52_428_800);
+});
 
 test('adds a trusted media extension to an extensionless video label', () => {
     assert.equal(sharedFilename({ label: '720p MP4' }, 'video/mp4'), '720p MP4.mp4');
@@ -28,4 +32,8 @@ test('uses a safe Content-Disposition filename without duplicate extensions', ()
 
 test('sanitizes control characters and path separators in fallback labels', () => {
     assert.equal(sharedFilename({ label: 'bad/\\name\r\n' }, 'image/png'), 'bad-name.png');
+});
+
+test('keeps the safe MP4 extension when a prepared Share file supplies a filename', () => {
+    assert.equal(sharedFilename({ filename: 'Rick Astley.mp4' }, 'video/mp4'), 'Rick Astley.mp4');
 });
