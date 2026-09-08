@@ -75,13 +75,13 @@ final class ShareMediaPreparationService
     private function remux(string $input, string $output, int $limit): void
     {
         $command = [
-            '/usr/bin/ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-y',
+            (string) config('services.downloads.share_ffmpeg_binary'),
+            '-nostdin', '-hide_banner', '-loglevel', 'error', '-y',
             '-i', $input,
             '-map', '0:v?', '-map', '0:a?',
             '-map_metadata', '-1', '-map_chapters', '-1',
             '-c', 'copy',
             '-movflags', '+faststart',
-            '-fs', (string) $limit,
             $output,
         ];
         $descriptors = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];

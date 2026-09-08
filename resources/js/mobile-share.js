@@ -1,4 +1,4 @@
-const MAX_SHARE_BYTES = 25 * 1024 * 1024;
+export const MAX_SHARE_BYTES = 52_428_800;
 const EXTENSIONS = new Map([
     ['video/mp4', 'mp4'],
     ['video/webm', 'webm'],

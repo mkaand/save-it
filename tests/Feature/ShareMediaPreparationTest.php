@@ -20,6 +20,11 @@ class ShareMediaPreparationTest extends TestCase
         parent::tearDown();
     }
 
+    public function test_share_limit_is_fifty_mib(): void
+    {
+        $this->assertSame(52_428_800, config('services.downloads.share_max_file_bytes'));
+    }
+
     public function test_share_preparation_strips_stream_creation_dates_without_changing_bitstreams_or_normal_download_source(): void
     {
         if (! is_executable('/usr/bin/ffmpeg') || ! is_executable('/usr/bin/ffprobe')) {
@@ -94,6 +99,45 @@ class ShareMediaPreparationTest extends TestCase
         $this->assertFileDoesNotExist($orphan);
     }
 
+    public function test_remux_output_over_the_share_limit_is_rejected_without_caching_a_partial_file(): void
+    {
+        $source = storage_path('app/private/downloads/ios-share-source-'.bin2hex(random_bytes(4)).'.mp4');
+        File::ensureDirectoryExists(dirname($source), 0700, true);
+        file_put_contents($source, str_repeat('s', 16));
+        $this->paths[] = $source;
+        $script = $this->fakeFfmpeg('printf \'0123456789abcdefg\' > "$last"'."\nexit 0");
+        config([
+            'services.downloads.share_max_file_bytes' => 16,
+            'services.downloads.share_ffmpeg_binary' => $script,
+        ]);
+        $token = $this->app->make(DownloadAssetStore::class)->issue([
+            'mode' => 'local_file', 'path' => $source, 'filename' => 'source.mp4', 'mime_type' => 'video/mp4',
+        ]);
+
+        $this->postJson('/api/share-preparations', ['token' => $token])
+            ->assertUnprocessable()
+            ->assertJsonPath('error.code', 'share_unavailable');
+        $this->assertSame([], glob($this->app->make(ShareMediaPreparationStore::class)->directory().'/*.mp4') ?: []);
+    }
+
+    public function test_failed_remux_never_serves_its_partial_output(): void
+    {
+        $source = storage_path('app/private/downloads/ios-share-source-'.bin2hex(random_bytes(4)).'.mp4');
+        File::ensureDirectoryExists(dirname($source), 0700, true);
+        file_put_contents($source, 'source');
+        $this->paths[] = $source;
+        $script = $this->fakeFfmpeg('printf \'partial\' > "$last"'."\nexit 1");
+        config(['services.downloads.share_ffmpeg_binary' => $script]);
+        $token = $this->app->make(DownloadAssetStore::class)->issue([
+            'mode' => 'local_file', 'path' => $source, 'filename' => 'source.mp4', 'mime_type' => 'video/mp4',
+        ]);
+
+        $this->postJson('/api/share-preparations', ['token' => $token])
+            ->assertUnprocessable()
+            ->assertJsonPath('error.code', 'share_unavailable');
+        $this->assertSame([], glob($this->app->make(ShareMediaPreparationStore::class)->directory().'/*.mp4') ?: []);
+    }
+
     private function createMp4Fixture(string $path): void
     {
         $this->command([
@@ -129,6 +173,16 @@ class ShareMediaPreparationTest extends TestCase
             '/usr/bin/ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-i', $path,
             '-map', $map, '-c', 'copy', '-f', 'hash', '-',
         ]));
+    }
+
+    private function fakeFfmpeg(string $body): string
+    {
+        $script = storage_path('app/private/share-ffmpeg-'.bin2hex(random_bytes(4)).'.sh');
+        file_put_contents($script, "#!/bin/sh\nlast=\nfor argument do last=\"\$argument\"; done\ncase \" \$* \" in *' -fs '*) exit 99;; esac\n{$body}\n");
+        chmod($script, 0700);
+        $this->paths[] = $script;
+
+        return $script;
     }
 
     /** @param array<int, string> $command */
