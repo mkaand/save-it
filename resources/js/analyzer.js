@@ -414,14 +414,35 @@ export function initAnalyzer() {
             if (canOfferMobileShare(output)) {
                 const share = element('button', 'output-share', 'Share / Save');
                 share.type = 'button';
+                share.setAttribute('aria-live', 'polite');
+                share.setAttribute('aria-label', `Share or save ${output.label}`);
+                const setShareState = ({ phase, percent = null } = {}) => {
+                    const loading = phase === 'preparing' || phase === 'loading';
+                    const label = phase === 'preparing'
+                        ? 'Preparing…'
+                        : phase === 'loading'
+                            ? (Number.isInteger(percent) ? `Loading ${percent}%` : 'Loading…')
+                            : 'Share / Save';
+
+                    share.textContent = label;
+                    share.disabled = loading;
+                    share.classList.toggle('is-loading', loading);
+                    share.setAttribute('aria-label', `${label}: ${output.label}`);
+                };
                 share.addEventListener('click', async () => {
+                    if (share.dataset.busy === 'true') {
+                        return;
+                    }
+
+                    share.dataset.busy = 'true';
                     share.disabled = true;
                     try {
-                        await shareMedia(output);
+                        await shareMedia(output, setShareState);
                     } catch (shareError) {
                         setStatus(shareError?.message || 'Sharing could not be prepared.', 'error');
                     } finally {
-                        share.disabled = false;
+                        delete share.dataset.busy;
+                        setShareState();
                     }
                 });
                 actions.append(share);

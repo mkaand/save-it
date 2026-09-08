@@ -93,12 +93,44 @@ export function sharedFilename(output, mime, disposition = null) {
     return `${stem}.${extension}`;
 }
 
-export async function shareMedia(output) {
+export async function responseBlob(response, size, onState = () => {}) {
+    const reader = response.body?.getReader?.();
+
+    if (!reader) {
+        onState({ phase: 'loading', percent: null });
+        return response.blob();
+    }
+
+    const chunks = [];
+    let received = 0;
+    let lastPercent = -1;
+    onState({ phase: 'loading', percent: 0 });
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+            break;
+        }
+
+        chunks.push(value);
+        received += value.byteLength;
+        const percent = Math.min(100, Math.floor((received / size) * 100));
+        if (percent !== lastPercent) {
+            lastPercent = percent;
+            onState({ phase: 'loading', percent });
+        }
+    }
+
+    return new Blob(chunks, { type: response.headers.get('content-type') || '' });
+}
+
+export async function shareMedia(output, onState = () => {}) {
     let url = sameOriginUrl(delivery(output));
     if (!url) {
         throw new Error('This file is no longer available. Analyze the URL again.');
     }
     if (mediaType(output?.mime_type) === 'video/mp4') {
+        onState({ phase: 'preparing' });
         const token = tokenFromDelivery(url);
         if (!token) {
             throw new Error('This file is no longer available. Analyze the URL again.');
@@ -116,6 +148,7 @@ export async function shareMedia(output) {
         url = preparedUrl;
         output = { ...output, filename: data.data.filename, mime_type: data.data.mime_type };
     }
+    onState({ phase: 'loading', percent: null });
     const probe = await fetch(url, { headers: { Range: 'bytes=0-0' } });
     const range = probe.headers.get('content-range') || '';
     const match = /^bytes 0-0\/([0-9]+)$/.exec(range);
@@ -128,7 +161,7 @@ export async function shareMedia(output) {
     if (!response.ok) {
         throw new Error('The file could not be prepared for sharing.');
     }
-    const blob = await response.blob();
+    const blob = await responseBlob(response, size, onState);
     const mime = mediaType(response.headers.get('content-type')) || mediaType(blob.type);
     if (blob.size !== size || blob.size > MAX_SHARE_BYTES) {
         throw new Error('The file could not be prepared for sharing.');

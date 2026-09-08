@@ -1006,15 +1006,58 @@ summary:focus-visible {
 }
 
 .output-share {
+    position: relative;
     min-height: 2.75rem;
+    min-width: 7.9rem;
     padding: 0.55rem 0.75rem;
-    border: 1px solid var(--border);
+    border: 1px solid color-mix(in srgb, var(--accent) 48%, var(--border));
     border-radius: 0.7rem;
     background: var(--surface-raised);
     color: var(--text);
+    cursor: pointer;
     font: inherit;
     font-size: 0.72rem;
     font-weight: 750;
+    transition: border-color 140ms ease, background 140ms ease, transform 100ms ease, opacity 140ms ease;
+}
+
+.output-share:hover:not(:disabled) {
+    border-color: var(--accent);
+    background: var(--surface-strong);
+}
+
+.output-share:active:not(:disabled) {
+    transform: translateY(1px);
+}
+
+.output-share:disabled {
+    cursor: wait;
+    opacity: 0.78;
+}
+
+.output-share.is-loading::before {
+    display: inline-block;
+    width: 0.65rem;
+    height: 0.65rem;
+    margin-right: 0.38rem;
+    border: 1.5px solid color-mix(in srgb, var(--accent) 35%, transparent);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    content: '';
+    vertical-align: -0.08rem;
+    animation: output-share-spin 700ms linear infinite;
+}
+
+@keyframes output-share-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .output-share.is-loading::before {
+        animation: none;
+    }
 }
 
 .output-card {
