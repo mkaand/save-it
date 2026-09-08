@@ -403,6 +403,111 @@ class ExtractorClientTest extends TestCase
         }
     }
 
+    #[DataProvider('primaryPreviewProvider')]
+    public function test_primary_preview_is_provider_independent_when_durable_caching_succeeds(
+        string $provider,
+        string $input,
+        array $assets,
+    ): void {
+        $primaryPreview = $assets[0]['thumbnail_url'];
+        $policy = Mockery::mock(UpstreamUrlPolicy::class);
+        $policy->shouldReceive('validate')->once()->with($primaryPreview, $provider)->andReturn($primaryPreview);
+        $this->app->instance(UpstreamUrlPolicy::class, $policy);
+
+        Http::fake(function (Request $request) use ($provider, $assets) {
+            if ($request->method() === 'POST') {
+                return Http::response($this->socialSuccessResponse(
+                    $request->data()['request_id'],
+                    $provider,
+                    $assets,
+                ));
+            }
+
+            $png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL6xQAAAABJRU5ErkJggg==', true);
+
+            return Http::response($png, 200, [
+                'Content-Type' => 'image/png',
+                'Content-Length' => (string) strlen((string) $png),
+            ]);
+        });
+
+        $response = $this->postJson('/api/analyze', ['url' => $input])->assertOk();
+
+        $this->assertMatchesRegularExpression(
+            '#^/api/previews/[a-z0-9]{48}$#',
+            (string) $response->json('data.thumbnail_url'),
+        );
+        $this->assertSame(1, $response->json('data.assets.0.order'));
+        $this->assertMatchesRegularExpression(
+            '#^/api/downloads/[a-z0-9]{48}\.[a-f0-9]{64}$#',
+            (string) $response->json('data.assets.0.preview_url'),
+        );
+
+        $cached = app(RecentPreviewStore::class)->resolve(basename((string) $response->json('data.thumbnail_url')));
+        if (is_array($cached)) {
+            @unlink($cached['path']);
+        }
+    }
+
+    #[DataProvider('primaryPreviewProvider')]
+    public function test_durable_preview_failure_uses_only_an_ephemeral_current_result_fallback(
+        string $provider,
+        string $input,
+        array $assets,
+    ): void {
+        $primaryPreview = $assets[0]['thumbnail_url'];
+        $policy = Mockery::mock(UpstreamUrlPolicy::class);
+        $policy->shouldReceive('validate')->once()->with($primaryPreview, $provider)->andReturn($primaryPreview);
+        $this->app->instance(UpstreamUrlPolicy::class, $policy);
+
+        Http::fake(function (Request $request) use ($provider, $assets) {
+            if ($request->method() === 'POST') {
+                return Http::response($this->socialSuccessResponse(
+                    $request->data()['request_id'],
+                    $provider,
+                    $assets,
+                ));
+            }
+
+            return Http::response('not an image', 200, [
+                'Content-Type' => 'image/jpeg',
+                'Content-Length' => '12',
+            ]);
+        });
+
+        $response = $this->postJson('/api/analyze', ['url' => $input])->assertOk();
+
+        $this->assertMatchesRegularExpression(
+            '#^/api/downloads/[a-z0-9]{48}\.[a-f0-9]{64}$#',
+            (string) $response->json('data.thumbnail_url'),
+        );
+        $this->assertSame(
+            $response->json('data.assets.0.preview_url'),
+            $response->json('data.thumbnail_url'),
+        );
+        $this->assertStringNotContainsString('twimg.com', $response->getContent());
+        $this->assertStringNotContainsString('cdninstagram.com', $response->getContent());
+    }
+
+    /**
+     * @return array<string, array{string, string, array<int, array<string, mixed>>}>
+     */
+    public static function primaryPreviewProvider(): array
+    {
+        return [
+            'X multi-image' => [
+                'x',
+                'https://x.com/example/status/123',
+                [self::imageAsset(1), self::imageAsset(2)],
+            ],
+            'Instagram multi-image' => [
+                'instagram',
+                'https://instagram.com/p/Code123/',
+                [self::instagramAsset('image', 1), self::instagramAsset('image', 2)],
+            ],
+        ];
+    }
+
     public function test_linkedin_extraction_maps_to_safe_public_response(): void
     {
         Http::fake(function (Request $request) {
@@ -646,6 +751,45 @@ class ExtractorClientTest extends TestCase
                 ],
                 'assets' => $assets,
                 'capabilities' => ['metadata', 'media_assets', 'video_variants'],
+            ],
+        ];
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $assets
+     * @return array<string, mixed>
+     */
+    private function socialSuccessResponse(string $requestId, string $provider, array $assets): array
+    {
+        $instagram = $provider === 'instagram';
+
+        return [
+            'data' => [
+                'request_id' => $requestId,
+                'provider' => $provider,
+                'provider_label' => $instagram ? 'Instagram' : 'X',
+                'provider_variant' => $instagram ? 'post' : null,
+                'media_type' => 'carousel',
+                'source_url' => $instagram
+                    ? 'https://instagram.com/p/Code123/'
+                    : 'https://x.com/example/status/123',
+                'normalized_url' => $instagram
+                    ? 'https://www.instagram.com/p/Code123/'
+                    : 'https://x.com/example/status/123',
+                'status' => 'ready',
+                'provider_maturity' => null,
+                'warnings' => [],
+                'metadata' => [
+                    'post_id' => $instagram ? 'Code123' : '123',
+                    $instagram ? 'caption' : 'text' => 'Primary preview fixture',
+                    'author_name' => 'Example',
+                    'author_handle' => $instagram ? 'example.author' : 'example',
+                    'published_at' => '2026-09-08T12:00:00Z',
+                    'thumbnail_url' => $assets[0]['thumbnail_url'],
+                    'media_count' => count($assets),
+                ],
+                'assets' => $assets,
+                'capabilities' => ['metadata', 'media_assets', 'multiple_assets'],
             ],
         ];
     }
