@@ -6,6 +6,8 @@ use App\Enums\MediaPlatform;
 use App\Services\Downloads\DownloadAssetStore;
 use App\Services\Extractor\ExtractorClient;
 use App\Services\Extractor\ExtractorRecognition;
+use App\Services\Previews\PrimaryPreviewResolver;
+use App\Services\Previews\PrimaryPreviewSelection;
 use App\Services\Previews\RecentPreviewStore;
 
 final class MediaUrlAnalyzer
@@ -14,6 +16,7 @@ final class MediaUrlAnalyzer
         private readonly ExtractorClient $extractor,
         private readonly DownloadAssetStore $downloads,
         private readonly RecentPreviewStore $previews,
+        private readonly PrimaryPreviewResolver $primaryPreviews,
     ) {}
 
     /**
@@ -97,8 +100,14 @@ final class MediaUrlAnalyzer
             : (is_string($handle) && $handle !== ''
                 ? "{$recognition->platform->label()} post by @{$handle}"
                 : "{$recognition->platform->label()} post");
-        $publicAssets = $this->publicAssets($recognition, $title);
-        $publicThumbnail = $this->durablePrimaryPreviewReference($recognition);
+        $selection = $this->primaryPreviews->select($metadata, $recognition->assets);
+        $publicAssets = $this->publicAssets($recognition, $title, $selection);
+        $publicThumbnail = $this->primaryPreviewReference(
+            $recognition,
+            $title,
+            $selection,
+            $publicAssets,
+        );
         $metadata['thumbnail_url'] = $publicThumbnail;
 
         return [
@@ -135,8 +144,14 @@ final class MediaUrlAnalyzer
                     : 'LinkedIn public post');
         }
 
-        $publicAssets = $this->publicAssets($recognition, $title);
-        $publicThumbnail = $this->durablePrimaryPreviewReference($recognition);
+        $selection = $this->primaryPreviews->select($metadata, $recognition->assets);
+        $publicAssets = $this->publicAssets($recognition, $title, $selection);
+        $publicThumbnail = $this->primaryPreviewReference(
+            $recognition,
+            $title,
+            $selection,
+            $publicAssets,
+        );
         unset($metadata['captions_url']);
         $metadata['thumbnail_url'] = $publicThumbnail;
 
@@ -523,12 +538,16 @@ final class MediaUrlAnalyzer
     /**
      * @return array<int, array<string, mixed>>
      */
-    private function publicAssets(ExtractorRecognition $recognition, string $title): array
-    {
-        return array_map(function (array $asset) use ($recognition, $title): array {
-            $previewSource = $asset['thumbnail_url'] ?? (
-                $asset['type'] === 'image' ? ($asset['url'] ?? null) : null
-            );
+    private function publicAssets(
+        ExtractorRecognition $recognition,
+        string $title,
+        PrimaryPreviewSelection $selection,
+    ): array {
+        return array_map(function (array $asset) use ($recognition, $title, $selection): array {
+            $previewSource = $this->primaryPreviews->previewSourceForAsset($asset);
+            if ($selection->assetId === ($asset['id'] ?? null) && $selection->source !== null) {
+                $previewSource = $selection->source;
+            }
             $previewUrl = null;
             if (is_string($previewSource) && $previewSource !== '') {
                 $previewUrl = $this->ephemeralPreviewReference([
@@ -577,25 +596,41 @@ final class MediaUrlAnalyzer
     }
 
     /** @param array<string, mixed> $asset */
-    private function durablePrimaryPreviewReference(ExtractorRecognition $recognition): ?string
-    {
-        $asset = collect($recognition->assets)->first(
-            fn (array $candidate): bool => ($candidate['role'] ?? null) === 'primary',
-        ) ?? ($recognition->assets[0] ?? null);
-        if (! is_array($asset)) {
+    private function primaryPreviewReference(
+        ExtractorRecognition $recognition,
+        string $title,
+        PrimaryPreviewSelection $selection,
+        array $publicAssets,
+    ): ?string {
+        if (! $selection->isAvailable()) {
             return null;
         }
 
-        $previewSource = $asset['thumbnail_url'] ?? (
-            ($asset['type'] ?? null) === 'image' ? ($asset['url'] ?? null) : null
-        );
-        if (! is_string($previewSource) || $previewSource === '') {
-            return null;
-        }
-
-        return $this->durablePreviewReference([
+        $durable = $this->durablePreviewReference([
             'provider' => $recognition->platform->value,
-            'upstream_url' => $previewSource,
+            'upstream_url' => $selection->source,
+        ]);
+        if ($durable !== null) {
+            return $durable;
+        }
+
+        if ($selection->assetId !== null) {
+            $asset = collect($publicAssets)->firstWhere('id', $selection->assetId);
+            if (is_array($asset) && is_string($asset['preview_url'] ?? null)) {
+                return $asset['preview_url'];
+            }
+        }
+
+        return $this->ephemeralPreviewReference([
+            'version' => 1,
+            'mode' => 'proxy',
+            'provider' => $recognition->platform->value,
+            'asset_id' => 'primary-preview',
+            'upstream_url' => $selection->source,
+            'mime_type' => 'image/jpeg',
+            'filename' => $this->downloadFilename($title.' preview', 'image/jpeg', 1),
+            'disposition' => 'inline',
+            'expected_size' => null,
         ]);
     }
 
