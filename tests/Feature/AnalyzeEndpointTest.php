@@ -158,6 +158,8 @@ class AnalyzeEndpointTest extends TestCase
         $this->fakeRecognition(
             'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
             'youtube',
+            null,
+            82_036_850,
         );
 
         $response = $this->postJson('/api/analyze', [
@@ -179,6 +181,23 @@ class AnalyzeEndpointTest extends TestCase
         $this->assertStringNotContainsString('googlevideo.com', $content);
         $this->assertStringNotContainsString('APP_KEY', $content);
         $this->assertStringNotContainsString('stack', strtolower($content));
+        $this->assertSame(104_857_600, $response->json('data.outputs.0.share.max_bytes'));
+        $this->assertSame(82_036_850, $response->json('data.outputs.0.share.size_bytes'));
+        $this->assertTrue($response->json('data.outputs.0.share.eligible'));
+    }
+
+    public function test_known_output_sizes_have_provider_independent_share_eligibility(): void
+    {
+        $this->fakeRecognition('https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'youtube', null, 115_343_360);
+
+        $response = $this->postJson('/api/analyze', [
+            'url' => 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+        ])->assertOk();
+
+        $this->assertFalse($response->json('data.outputs.0.share.eligible'));
+        $this->assertSame('too_large', $response->json('data.outputs.0.share.reason'));
+        $this->assertSame(115_343_360, $response->json('data.outputs.0.share.size_bytes'));
+        $this->assertSame(104_857_600, $response->json('data.outputs.0.share.max_bytes'));
     }
 
     /**
@@ -249,6 +268,7 @@ class AnalyzeEndpointTest extends TestCase
         string $sourceUrl,
         string $platform,
         ?string $normalizedUrl = null,
+        ?int $videoSize = null,
     ): void {
         $provider = $platform === 'youtube_shorts' ? 'youtube' : $platform;
         $variant = $platform === 'youtube_shorts' ? 'shorts' : null;
@@ -258,6 +278,7 @@ class AnalyzeEndpointTest extends TestCase
             $provider,
             $variant,
             $normalizedUrl,
+            $videoSize,
         ) {
             $requestedUrl = $request->data()['url'];
             $requestId = $request->data()['request_id'];
@@ -267,7 +288,7 @@ class AnalyzeEndpointTest extends TestCase
 
             if ($provider === 'youtube') {
                 return Http::response(
-                    $this->youtubeSuccessResponse($requestId, $effectiveUrl, $variant),
+                    $this->youtubeSuccessResponse($requestId, $effectiveUrl, $variant, $videoSize),
                 );
             }
 
@@ -305,6 +326,7 @@ class AnalyzeEndpointTest extends TestCase
         string $requestId,
         string $normalizedUrl,
         ?string $variant,
+        ?int $videoSize = null,
     ): array {
         preg_match('/(?:v=|shorts\/)([A-Za-z0-9_-]{11})/', $normalizedUrl, $matches);
         $videoId = $matches[1] ?? 'dQw4w9WgXcQ';
@@ -348,7 +370,7 @@ class AnalyzeEndpointTest extends TestCase
                         'resolution' => '1920×1080',
                         'fps' => 30,
                         'bitrate_kbps' => 2500,
-                        'estimated_filesize' => 55000000,
+                        'estimated_filesize' => $videoSize ?? 55_000_000,
                         'has_audio' => false,
                         'requires_merge' => true,
                         'preference' => 0,

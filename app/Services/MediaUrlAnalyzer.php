@@ -71,7 +71,7 @@ final class MediaUrlAnalyzer
             'thumbnail_url' => $videoId === null ? null : "https://i.ytimg.com/vi/{$videoId}/hqdefault.jpg",
             'status' => 'preview',
             'assets' => [],
-            'outputs' => $this->outputs($platform),
+            'outputs' => $this->withShareEligibility($this->outputs($platform)),
         ];
     }
 
@@ -123,7 +123,7 @@ final class MediaUrlAnalyzer
             'capabilities' => $recognition->capabilities,
             'provider_maturity' => $recognition->maturity,
             'warnings' => $recognition->warnings,
-            'outputs' => $this->assetOutputs($recognition, $title),
+            'outputs' => $this->withShareEligibility($this->assetOutputs($recognition, $title)),
         ];
     }
 
@@ -178,7 +178,7 @@ final class MediaUrlAnalyzer
             'assets' => $publicAssets,
             'capabilities' => $recognition->capabilities,
             'warnings' => $recognition->warnings,
-            'outputs' => $outputs,
+            'outputs' => $this->withShareEligibility($outputs),
         ];
     }
 
@@ -254,6 +254,7 @@ final class MediaUrlAnalyzer
                 'detail' => "{$codec}{$merge}",
                 'mime_type' => $payload['mime_type'],
                 'available' => true,
+                'share_size_bytes' => $payload['expected_size'],
                 ...$this->delivery($mode, $token),
             ];
         }
@@ -283,6 +284,7 @@ final class MediaUrlAnalyzer
                 'detail' => "{$format['audio_codec']}{$bitrate}",
                 'mime_type' => $format['container'] === 'm4a' ? 'audio/mp4' : 'audio/webm',
                 'available' => true,
+                'share_size_bytes' => $format['estimated_filesize'] ?? null,
                 ...$this->delivery('youtube_direct', $token),
             ];
         }
@@ -313,6 +315,7 @@ final class MediaUrlAnalyzer
                     'label' => "MP3 {$bitrate} kbps",
                     'detail' => 'Prepared with FFmpeg',
                     'available' => true,
+                    'share_size_bytes' => null,
                     ...$this->delivery('youtube_mp3', $token),
                 ];
             }
@@ -339,6 +342,7 @@ final class MediaUrlAnalyzer
                 'detail' => 'Original preview image',
                 'mime_type' => 'image/jpeg',
                 'available' => true,
+                'share_size_bytes' => null,
                 ...$this->delivery('proxy', $token),
             ];
         }
@@ -393,7 +397,7 @@ final class MediaUrlAnalyzer
                 'bitrates_kbps' => [128, 192, 256, 320],
             ]],
             'assets' => [],
-            'outputs' => $outputs,
+            'outputs' => $this->withShareEligibility($outputs),
         ];
     }
 
@@ -488,6 +492,9 @@ final class MediaUrlAnalyzer
                     'delivery' => 'proxy',
                     'download_url' => route('api.downloads.show', ['token' => $token], false),
                     'expires_in' => (int) config('services.downloads.token_ttl_seconds'),
+                    'share_size_bytes' => is_int($source['filesize'] ?? null)
+                        ? $source['filesize']
+                        : null,
                 ];
             }
         }
@@ -527,12 +534,42 @@ final class MediaUrlAnalyzer
                     'label' => 'Download all as ZIP',
                     'detail' => count($sources).' media files · prepared securely',
                     'available' => true,
+                    'share_size_bytes' => null,
                     ...$this->delivery('zip', $token),
                 ];
             }
         }
 
         return $outputs;
+    }
+
+    /**
+     * Attach only safe, provider-neutral Share / Save eligibility metadata.
+     *
+     * @param  array<int, array<string, mixed>>  $outputs
+     * @return array<int, array<string, mixed>>
+     */
+    private function withShareEligibility(array $outputs): array
+    {
+        $maximum = max(1, (int) config('services.downloads.share_max_file_bytes'));
+
+        return array_map(function (array $output) use ($maximum): array {
+            $size = $output['share_size_bytes'] ?? null;
+            unset($output['share_size_bytes']);
+            $size = is_int($size) && $size > 0 ? $size : null;
+            $output['share'] = [
+                'eligible' => $size !== null
+                    ? $size <= $maximum
+                    : null,
+                'reason' => $size !== null && $size > $maximum
+                    ? 'too_large'
+                    : null,
+                'max_bytes' => $maximum,
+                'size_bytes' => $size,
+            ];
+
+            return $output;
+        }, $outputs);
     }
 
     /**
