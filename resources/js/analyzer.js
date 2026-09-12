@@ -34,7 +34,8 @@ import {
     normalizeJobStatus,
     responseJson,
 } from './download-delivery.js';
-import { canOfferMobileShare, shareMedia } from './mobile-share.js';
+import { canOfferMobileShare } from './mobile-share.js';
+import { createShareSession } from './share-session.js';
 
 function browserStorage() {
     try {
@@ -153,6 +154,12 @@ export function initAnalyzer() {
     const storage = browserStorage();
     let recentItems = readRecentFetches(storage);
     let clearTimer;
+    let releasePreparedShares = [];
+
+    function clearPreparedShares() {
+        releasePreparedShares.forEach((release) => release());
+        releasePreparedShares = [];
+    }
 
     function setError(message = '') {
         error.textContent = message;
@@ -245,6 +252,7 @@ export function initAnalyzer() {
     }
 
     function renderResult(data) {
+        clearPreparedShares();
         resultPanel.replaceChildren();
 
         const primaryAsset = Array.isArray(data.assets) ? data.assets[0] : null;
@@ -418,41 +426,55 @@ export function initAnalyzer() {
                 share.setAttribute('aria-label', `Share or save ${output.label}`);
                 const setShareState = ({ phase, percent = null } = {}) => {
                     const loading = phase === 'preparing' || phase === 'loading';
+                    const ready = phase === 'ready';
+                    const sharing = phase === 'sharing';
                     const label = phase === 'preparing'
                         ? 'Preparing…'
                         : phase === 'loading'
                             ? (Number.isInteger(percent) ? `Loading ${percent}%` : 'Loading…')
-                            : 'Share / Save';
+                            : ready
+                                ? 'Ready · Share / Save'
+                                : sharing
+                                    ? 'Opening…'
+                                    : 'Share / Save';
 
                     share.textContent = label;
-                    share.disabled = loading;
-                    share.classList.toggle('is-loading', loading);
-                    share.setAttribute('aria-label', `${label}: ${output.label}`);
+                    share.disabled = loading || sharing;
+                    share.classList.toggle('is-loading', loading || sharing);
+                    share.setAttribute(
+                        'aria-label',
+                        ready
+                            ? `Ready to share or save ${output.label}`
+                            : `${label}: ${output.label}`,
+                    );
                 };
-                share.addEventListener('click', async () => {
-                    if (share.dataset.busy === 'true') {
-                        return;
+
+                const markDownloadOnly = (shareError) => {
+                    if (shareError?.code !== 'media_too_large') {
+                        return false;
                     }
 
-                    share.dataset.busy = 'true';
-                    share.disabled = true;
-                    try {
-                        await shareMedia(output, setShareState);
-                    } catch (shareError) {
-                        if (shareError?.code === 'media_too_large') {
-                            output.share = {
-                                ...(output.share || {}),
-                                eligible: false,
-                                reason: 'too_large',
-                            };
-                            share.remove();
-                            actions.append(element('p', 'output-share-notice', 'Download only · Too large for Share / Save'));
-                        }
-                        setStatus(shareError?.message || 'Sharing could not be prepared.', 'error');
-                    } finally {
-                        delete share.dataset.busy;
-                        setShareState();
-                    }
+                    output.share = {
+                        ...(output.share || {}),
+                        eligible: false,
+                        reason: 'too_large',
+                    };
+                    share.remove();
+                    actions.append(element('p', 'output-share-notice', 'Download only · Too large for Share / Save'));
+
+                    return true;
+                };
+
+                const shareSession = createShareSession(output, {
+                    onDownloadOnly: markDownloadOnly,
+                    onError: (message) => setStatus(message, 'error'),
+                    onState: setShareState,
+                });
+                releasePreparedShares.push(shareSession.release);
+
+                share.addEventListener('click', () => {
+                    // activate() calls openShareSheet() synchronously when ready.
+                    shareSession.activate();
                 });
                 actions.append(share);
             } else if (output?.share?.eligible === false && output?.share?.reason === 'too_large') {
@@ -526,6 +548,7 @@ export function initAnalyzer() {
 
     async function analyze() {
         const submittedUrl = input.value.trim();
+        clearPreparedShares();
         setError();
 
         if (!submittedUrl) {
@@ -597,6 +620,7 @@ export function initAnalyzer() {
     });
 
     clearInputButton.addEventListener('click', () => {
+        clearPreparedShares();
         input.value = '';
         setError();
         setStatus('Ready when you are.');
@@ -629,6 +653,7 @@ export function initAnalyzer() {
         }
 
         window.clearTimeout(clearTimer);
+        clearPreparedShares();
         clearRecentFetches(storage);
         recentItems = [];
         renderRecent();
