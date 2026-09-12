@@ -439,6 +439,15 @@ export function initAnalyzer() {
                     try {
                         await shareMedia(output, setShareState);
                     } catch (shareError) {
+                        if (shareError?.code === 'media_too_large') {
+                            output.share = {
+                                ...(output.share || {}),
+                                eligible: false,
+                                reason: 'too_large',
+                            };
+                            share.remove();
+                            actions.append(element('p', 'output-share-notice', 'Download only · Too large for Share / Save'));
+                        }
                         setStatus(shareError?.message || 'Sharing could not be prepared.', 'error');
                     } finally {
                         delete share.dataset.busy;
@@ -446,6 +455,8 @@ export function initAnalyzer() {
                     }
                 });
                 actions.append(share);
+            } else if (output?.share?.eligible === false && output?.share?.reason === 'too_large') {
+                actions.append(element('p', 'output-share-notice', 'Download only · Too large for Share / Save'));
             }
             outputBody.replaceChildren(actions);
             outputCard.append(outputBody);

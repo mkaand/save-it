@@ -20,9 +20,9 @@ class ShareMediaPreparationTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_share_limit_is_fifty_mib(): void
+    public function test_share_limit_is_one_hundred_mib(): void
     {
-        $this->assertSame(52_428_800, config('services.downloads.share_max_file_bytes'));
+        $this->assertSame(104_857_600, config('services.downloads.share_max_file_bytes'));
     }
 
     public function test_share_preparation_strips_stream_creation_dates_without_changing_bitstreams_or_normal_download_source(): void

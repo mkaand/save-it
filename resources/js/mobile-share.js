@@ -1,4 +1,3 @@
-export const MAX_SHARE_BYTES = 52_428_800;
 const EXTENSIONS = new Map([
     ['video/mp4', 'mp4'],
     ['video/webm', 'webm'],
@@ -10,6 +9,15 @@ const EXTENSIONS = new Map([
     ['image/png', 'png'],
     ['image/webp', 'webp'],
 ]);
+
+export class ShareMediaError extends Error {
+    constructor(code, message, status = null) {
+        super(message);
+        this.name = 'ShareMediaError';
+        this.code = code;
+        this.status = status;
+    }
+}
 
 function delivery(output) {
     return output?.delivery === 'proxy' && typeof output.download_url === 'string'
@@ -50,9 +58,27 @@ export function canOfferMobileShare(output) {
         window.matchMedia?.('(pointer: coarse)').matches
         && navigator.share
         && output?.available
+        && output?.share?.eligible !== false
         && output?.delivery === 'proxy'
         && sameOriginUrl(delivery(output)),
     );
+}
+
+function shareMaximum(output) {
+    const maximum = output?.share?.max_bytes;
+
+    return Number.isSafeInteger(maximum) && maximum > 0 ? maximum : null;
+}
+
+function preparationError(response, data) {
+    const code = data?.error?.code;
+    const message = data?.error?.message;
+
+    if (code === 'media_too_large' && typeof message === 'string' && message.length > 0 && message.length <= 240) {
+        return new ShareMediaError(code, message, response.status);
+    }
+
+    return new ShareMediaError('share_unavailable', 'The file could not be prepared for sharing.', response.status);
 }
 
 function mediaType(value) {
@@ -125,6 +151,13 @@ export async function responseBlob(response, size, onState = () => {}) {
 }
 
 export async function shareMedia(output, onState = () => {}) {
+    if (output?.share?.eligible === false) {
+        throw new ShareMediaError('media_too_large', 'Download only · Too large for Share / Save');
+    }
+    const maximum = shareMaximum(output);
+    if (!maximum) {
+        throw new ShareMediaError('share_unavailable', 'The file could not be prepared for sharing.');
+    }
     let url = sameOriginUrl(delivery(output));
     if (!url) {
         throw new Error('This file is no longer available. Analyze the URL again.');
@@ -142,8 +175,11 @@ export async function shareMedia(output, onState = () => {}) {
         });
         const data = await preparation.json().catch(() => null);
         const preparedUrl = sameOriginPreparationUrl(data?.data?.url);
-        if (!preparation.ok || !preparedUrl || data?.data?.mime_type !== 'video/mp4') {
-            throw new Error('The file could not be prepared for sharing.');
+        if (!preparation.ok) {
+            throw preparationError(preparation, data);
+        }
+        if (!preparedUrl || data?.data?.mime_type !== 'video/mp4') {
+            throw new ShareMediaError('share_unavailable', 'The file could not be prepared for sharing.', preparation.status);
         }
         url = preparedUrl;
         output = { ...output, filename: data.data.filename, mime_type: data.data.mime_type };
@@ -154,17 +190,17 @@ export async function shareMedia(output, onState = () => {}) {
     const match = /^bytes 0-0\/([0-9]+)$/.exec(range);
     const size = match ? Number(match[1]) : Number(probe.headers.get('content-length'));
     await probe.body?.cancel();
-    if (!Number.isSafeInteger(size) || size < 1 || size > MAX_SHARE_BYTES) {
-        throw new Error('Use Download for this file. It is too large to prepare for sharing.');
+    if (!Number.isSafeInteger(size) || size < 1 || size > maximum) {
+        throw new ShareMediaError('media_too_large', 'Download only · Too large for Share / Save');
     }
     const response = await fetch(url);
     if (!response.ok) {
-        throw new Error('The file could not be prepared for sharing.');
+        throw new ShareMediaError('share_unavailable', 'The file could not be prepared for sharing.');
     }
     const blob = await responseBlob(response, size, onState);
     const mime = mediaType(response.headers.get('content-type')) || mediaType(blob.type);
-    if (blob.size !== size || blob.size > MAX_SHARE_BYTES) {
-        throw new Error('The file could not be prepared for sharing.');
+    if (blob.size !== size || blob.size > maximum) {
+        throw new ShareMediaError('share_unavailable', 'The file could not be prepared for sharing.');
     }
     const file = new File([blob], sharedFilename(output, mime || blob.type, response.headers.get('content-disposition')), {
         type: mime || mediaType(blob.type) || 'application/octet-stream',

@@ -3,10 +3,13 @@ import test from 'node:test';
 
 import { File } from 'node:buffer';
 
-import { MAX_SHARE_BYTES, responseBlob, shareMedia, sharedFilename } from '../../resources/js/mobile-share.js';
+import { canOfferMobileShare, responseBlob, shareMedia, ShareMediaError, sharedFilename } from '../../resources/js/mobile-share.js';
 
-test('keeps the Web Share preparation limit at 50 MiB', () => {
-    assert.equal(MAX_SHARE_BYTES, 52_428_800);
+const share = (eligible = null, size = null) => ({
+    eligible,
+    reason: eligible === false ? 'too_large' : null,
+    max_bytes: 104_857_600,
+    size_bytes: size,
 });
 
 test('adds a trusted media extension to an extensionless video label', () => {
@@ -121,6 +124,7 @@ test('prepares an MP4 once, then reports Loading and real transfer progress', as
             download_url: '/api/downloads/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
             mime_type: 'video/mp4',
             label: 'Video',
+            share: share(true, 82_036_850),
         }, (state) => states.push(state));
     } finally {
         globalThis.fetch = originalFetch;
@@ -167,11 +171,67 @@ test('does not surface an AbortError from a dismissed share sheet', async () => 
             download_url: '/api/downloads/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
             mime_type: 'image/jpeg',
             label: 'Image',
+            share: share(null),
         }));
     } finally {
         globalThis.fetch = originalFetch;
         globalThis.File = originalFile;
         globalThis.window = originalWindow;
         Object.defineProperty(globalThis, 'navigator', { configurable: true, value: originalNavigator });
+    }
+});
+
+test('uses server eligibility to keep an 82 MiB MP4 shareable and a known 110 MiB asset download-only', () => {
+    const originalNavigator = globalThis.navigator;
+    const originalWindow = globalThis.window;
+    globalThis.window = {
+        location: { origin: 'https://save.allmy.win' },
+        matchMedia: () => ({ matches: true }),
+    };
+    Object.defineProperty(globalThis, 'navigator', {
+        configurable: true,
+        value: { share: async () => {} },
+    });
+
+    try {
+        const output = {
+            available: true,
+            delivery: 'proxy',
+            download_url: '/api/downloads/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        };
+        assert.equal(canOfferMobileShare({ ...output, share: share(true, 82_036_850) }), true);
+        assert.equal(canOfferMobileShare({ ...output, share: share(true, 28_413_689) }), true);
+        assert.equal(canOfferMobileShare({ ...output, share: share(false, 115_343_360) }), false);
+    } finally {
+        globalThis.window = originalWindow;
+        Object.defineProperty(globalThis, 'navigator', { configurable: true, value: originalNavigator });
+    }
+});
+
+test('preserves the safe media_too_large preparation error instead of replacing it with a generic error', async () => {
+    const originalFetch = globalThis.fetch;
+    const originalWindow = globalThis.window;
+    globalThis.window = { location: { origin: 'https://save.allmy.win' } };
+    globalThis.fetch = async () => new Response(JSON.stringify({ error: {
+        code: 'media_too_large',
+        message: 'The prepared download exceeds the size limit.',
+    } }), { status: 413, headers: { 'content-type': 'application/json' } });
+
+    try {
+        await assert.rejects(
+            () => shareMedia({
+                delivery: 'proxy',
+                download_url: '/api/downloads/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                mime_type: 'video/mp4',
+                share: share(null),
+            }),
+            (error) => error instanceof ShareMediaError
+                && error.code === 'media_too_large'
+                && error.message === 'The prepared download exceeds the size limit.'
+                && error.status === 413,
+        );
+    } finally {
+        globalThis.fetch = originalFetch;
+        globalThis.window = originalWindow;
     }
 });
