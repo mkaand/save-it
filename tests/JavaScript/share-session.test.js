@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createShareSession } from '../../resources/js/share-session.js';
+import { createShareSession, releaseOtherPreparedShares } from '../../resources/js/share-session.js';
 
 test('first activation prepares once, ignores duplicate preparation taps, and reaches ready without opening the share sheet', async () => {
     const states = [];
@@ -155,4 +155,113 @@ test('a too-large preparation never enters ready state', async () => {
     assert.equal(downloadOnly, 1);
     assert.equal(session.phase, 'idle');
     assert.equal(session.prepared, null);
+});
+
+test('switching outputs releases a ready file before another output starts preparation', async () => {
+    let aPrepares = 0;
+    let bPrepares = 0;
+    const outputA = createShareSession({}, {
+        prepare: async () => {
+            aPrepares += 1;
+            return { file: { id: 'a' }, title: 'A' };
+        },
+    });
+    const outputB = createShareSession({}, {
+        prepare: async () => {
+            bPrepares += 1;
+            return { file: { id: 'b' }, title: 'B' };
+        },
+    });
+    const sessions = [outputA, outputB];
+
+    await outputA.activate();
+    releaseOtherPreparedShares(sessions, outputB);
+    await outputB.activate();
+
+    assert.equal(aPrepares, 1);
+    assert.equal(bPrepares, 1);
+    assert.equal(outputA.phase, 'idle');
+    assert.equal(outputA.prepared, null);
+    assert.equal(outputB.phase, 'ready');
+    assert.equal(outputB.prepared.file.id, 'b');
+});
+
+test('switching outputs invalidates an in-flight preparation before it can retain a file', async () => {
+    let resolveA;
+    const outputA = createShareSession({}, {
+        prepare: () => new Promise((resolve) => {
+            resolveA = resolve;
+        }),
+    });
+    const outputB = createShareSession({}, {
+        prepare: async () => ({ file: { id: 'b' }, title: 'B' }),
+    });
+    const sessions = [outputA, outputB];
+
+    const preparingA = outputA.activate();
+    releaseOtherPreparedShares(sessions, outputB);
+    const preparingB = outputB.activate();
+    resolveA({ file: { id: 'a' }, title: 'A' });
+    await Promise.all([preparingA, preparingB]);
+
+    assert.equal(outputA.phase, 'idle');
+    assert.equal(outputA.prepared, null);
+    assert.equal(outputB.phase, 'ready');
+    assert.equal(outputB.prepared.file.id, 'b');
+});
+
+test('a ready output opens directly without releasing itself or preparing again', async () => {
+    let prepares = 0;
+    let opens = 0;
+    const output = createShareSession({}, {
+        prepare: async () => {
+            prepares += 1;
+            return { file: {}, title: 'A' };
+        },
+        open: () => {
+            opens += 1;
+            return Promise.resolve();
+        },
+    });
+
+    await output.activate();
+    assert.equal(output.phase, 'ready');
+    await output.activate();
+
+    assert.equal(prepares, 1);
+    assert.equal(opens, 1);
+    assert.equal(output.phase, 'idle');
+});
+
+test('only one output retains a file across repeated output switches and share errors', async () => {
+    let aPrepares = 0;
+    const outputA = createShareSession({}, {
+        prepare: async () => {
+            aPrepares += 1;
+            return { file: { id: `a-${aPrepares}` }, title: 'A' };
+        },
+        open: () => Promise.reject(Object.assign(new Error('Dismissed'), { name: 'AbortError' })),
+    });
+    const outputB = createShareSession({}, {
+        prepare: async () => ({ file: { id: 'b' }, title: 'B' }),
+        open: () => Promise.reject(Object.assign(new Error('Denied'), { name: 'NotAllowedError' })),
+    });
+    const sessions = [outputA, outputB];
+
+    await outputA.activate();
+    await outputA.activate();
+    assert.equal(outputA.phase, 'ready');
+    releaseOtherPreparedShares(sessions, outputB);
+    await outputB.activate();
+    await outputB.activate();
+    assert.equal(outputB.phase, 'ready');
+    assert.equal(outputA.prepared, null);
+
+    releaseOtherPreparedShares(sessions, outputA);
+    await outputA.activate();
+
+    assert.equal(aPrepares, 2);
+    assert.equal(outputA.phase, 'ready');
+    assert.equal(outputB.phase, 'idle');
+    assert.equal(outputB.prepared, null);
 });

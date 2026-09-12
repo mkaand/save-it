@@ -35,7 +35,10 @@ import {
     responseJson,
 } from './download-delivery.js';
 import { canOfferMobileShare } from './mobile-share.js';
-import { createShareSession } from './share-session.js';
+import {
+    createShareSession,
+    releaseOtherPreparedShares as releaseOtherShareSessions,
+} from './share-session.js';
 
 function browserStorage() {
     try {
@@ -154,11 +157,15 @@ export function initAnalyzer() {
     const storage = browserStorage();
     let recentItems = readRecentFetches(storage);
     let clearTimer;
-    let releasePreparedShares = [];
+    let shareSessions = [];
 
     function clearPreparedShares() {
-        releasePreparedShares.forEach((release) => release());
-        releasePreparedShares = [];
+        shareSessions.forEach((session) => session.release());
+        shareSessions = [];
+    }
+
+    function releaseOtherPreparedShares(currentSession) {
+        releaseOtherShareSessions(shareSessions, currentSession);
     }
 
     function setError(message = '') {
@@ -470,9 +477,12 @@ export function initAnalyzer() {
                     onError: (message) => setStatus(message, 'error'),
                     onState: setShareState,
                 });
-                releasePreparedShares.push(shareSession.release);
+                shareSessions.push(shareSession);
 
                 share.addEventListener('click', () => {
+                    if (shareSession.phase === 'idle') {
+                        releaseOtherPreparedShares(shareSession);
+                    }
                     // activate() calls openShareSheet() synchronously when ready.
                     shareSession.activate();
                 });

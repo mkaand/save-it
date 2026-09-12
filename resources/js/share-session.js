@@ -23,7 +23,7 @@ export function createShareSession(output, {
     function release() {
         generation += 1;
         prepared = null;
-        if (!preparing && phase !== 'sharing') {
+        if (phase !== 'sharing') {
             phase = 'idle';
             publish();
         }
@@ -117,5 +117,13 @@ export function createShareSession(output, {
         get prepared() {
             return prepared;
         },
+    });
+}
+
+export function releaseOtherPreparedShares(sessions, currentSession) {
+    sessions.forEach((session) => {
+        if (session !== currentSession) {
+            session.release();
+        }
     });
 }
