@@ -3,7 +3,16 @@ import test from 'node:test';
 
 import { File } from 'node:buffer';
 
-import { canOfferMobileShare, responseBlob, shareMedia, ShareMediaError, sharedFilename } from '../../resources/js/mobile-share.js';
+import {
+    canOfferMobileShare,
+    isShareAbortError,
+    openShareSheet,
+    prepareShareMedia,
+    responseBlob,
+    shareErrorMessage,
+    ShareMediaError,
+    sharedFilename,
+} from '../../resources/js/mobile-share.js';
 
 const share = (eligible = null, size = null) => ({
     eligible,
@@ -77,13 +86,14 @@ test('uses Loading without a percentage when stream reading is unavailable', asy
     assert.deepEqual(states, [{ phase: 'loading', percent: null }]);
 });
 
-test('prepares an MP4 once, then reports Loading and real transfer progress', async () => {
+test('prepares an MP4 without opening the share sheet, then opens it without refetching', async () => {
     const originalFetch = globalThis.fetch;
     const originalNavigator = globalThis.navigator;
     const originalFile = globalThis.File;
     const originalWindow = globalThis.window;
     const states = [];
     const calls = [];
+    let shareCalls = 0;
 
     globalThis.File = File;
     globalThis.window = { location: { origin: 'https://save.allmy.win' } };
@@ -91,7 +101,10 @@ test('prepares an MP4 once, then reports Loading and real transfer progress', as
         configurable: true,
         value: {
             canShare: () => true,
-            share: async () => {},
+            share: () => {
+                shareCalls += 1;
+                return Promise.resolve();
+            },
         },
     });
     globalThis.fetch = async (url, options = {}) => {
@@ -119,13 +132,20 @@ test('prepares an MP4 once, then reports Loading and real transfer progress', as
     };
 
     try {
-        await shareMedia({
+        const prepared = await prepareShareMedia({
             delivery: 'proxy',
             download_url: '/api/downloads/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
             mime_type: 'video/mp4',
             label: 'Video',
             share: share(true, 82_036_850),
         }, (state) => states.push(state));
+
+        assert.equal(shareCalls, 0);
+        assert.equal(prepared.file instanceof File, true);
+        assert.equal(calls.length, 3);
+        const opening = openShareSheet(prepared);
+        assert.equal(shareCalls, 1);
+        await opening;
     } finally {
         globalThis.fetch = originalFetch;
         globalThis.File = originalFile;
@@ -143,11 +163,13 @@ test('prepares an MP4 once, then reports Loading and real transfer progress', as
     ]);
 });
 
-test('does not surface an AbortError from a dismissed share sheet', async () => {
+test('keeps a prepared image usable after an AbortError without refetching', async () => {
     const originalFetch = globalThis.fetch;
     const originalNavigator = globalThis.navigator;
     const originalFile = globalThis.File;
     const originalWindow = globalThis.window;
+    let fetches = 0;
+    let shareAttempts = 0;
 
     globalThis.File = File;
     globalThis.window = { location: { origin: 'https://save.allmy.win' } };
@@ -155,10 +177,16 @@ test('does not surface an AbortError from a dismissed share sheet', async () => 
         configurable: true,
         value: {
             canShare: () => true,
-            share: async () => { throw Object.assign(new Error('Dismissed'), { name: 'AbortError' }); },
+            share: () => {
+                shareAttempts += 1;
+                return shareAttempts === 1
+                    ? Promise.reject(Object.assign(new Error('Dismissed'), { name: 'AbortError' }))
+                    : Promise.resolve();
+            },
         },
     });
     globalThis.fetch = async (url, options = {}) => {
+        fetches += 1;
         if (options.headers?.Range) {
             return new Response(new Uint8Array([0]), { status: 206, headers: { 'content-range': 'bytes 0-0/1' } });
         }
@@ -166,13 +194,19 @@ test('does not surface an AbortError from a dismissed share sheet', async () => 
     };
 
     try {
-        await assert.doesNotReject(() => shareMedia({
+        const prepared = await prepareShareMedia({
             delivery: 'proxy',
             download_url: '/api/downloads/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
             mime_type: 'image/jpeg',
             label: 'Image',
             share: share(null),
-        }));
+        });
+        assert.equal(fetches, 2);
+        await assert.rejects(() => openShareSheet(prepared), isShareAbortError);
+        assert.equal(shareErrorMessage(Object.assign(new Error('Dismissed'), { name: 'AbortError' })), null);
+        await openShareSheet(prepared);
+        assert.equal(fetches, 2);
+        assert.equal(shareAttempts, 2);
     } finally {
         globalThis.fetch = originalFetch;
         globalThis.File = originalFile;
@@ -219,7 +253,7 @@ test('preserves the safe media_too_large preparation error instead of replacing 
 
     try {
         await assert.rejects(
-            () => shareMedia({
+            () => prepareShareMedia({
                 delivery: 'proxy',
                 download_url: '/api/downloads/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
                 mime_type: 'video/mp4',
@@ -234,4 +268,15 @@ test('preserves the safe media_too_large preparation error instead of replacing 
         globalThis.fetch = originalFetch;
         globalThis.window = originalWindow;
     }
+});
+
+test('maps browser share exceptions to safe retry messages without exposing raw details', () => {
+    const notAllowed = Object.assign(
+        new Error('The request is not allowed by the user agent or the platform in the current context.'),
+        { name: 'NotAllowedError' },
+    );
+
+    assert.equal(shareErrorMessage(notAllowed), 'Tap Share / Save again to open the share sheet.');
+    assert.equal(shareErrorMessage(Object.assign(new Error('raw security detail'), { name: 'SecurityError' })), 'The share sheet could not be opened. Please try again.');
+    assert.equal(shareErrorMessage(new Error('raw unknown detail')), 'Sharing could not be prepared.');
 });

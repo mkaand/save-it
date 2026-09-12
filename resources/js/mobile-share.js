@@ -150,7 +150,7 @@ export async function responseBlob(response, size, onState = () => {}) {
     return new Blob(chunks, { type: response.headers.get('content-type') || '' });
 }
 
-export async function shareMedia(output, onState = () => {}) {
+export async function prepareShareMedia(output, onState = () => {}) {
     if (output?.share?.eligible === false) {
         throw new ShareMediaError('media_too_large', 'Download only · Too large for Share / Save');
     }
@@ -205,14 +205,48 @@ export async function shareMedia(output, onState = () => {}) {
     const file = new File([blob], sharedFilename(output, mime || blob.type, response.headers.get('content-disposition')), {
         type: mime || mediaType(blob.type) || 'application/octet-stream',
     });
+    return Object.freeze({
+        file,
+        title: output.label || 'Save It media',
+    });
+}
+
+export function openShareSheet(prepared) {
+    const file = prepared?.file;
+    const title = typeof prepared?.title === 'string' && prepared.title !== ''
+        ? prepared.title
+        : 'Save It media';
+
+    if (!(file instanceof File)) {
+        throw new ShareMediaError('share_unavailable', 'The file could not be prepared for sharing.');
+    }
+
     if (navigator.canShare && !navigator.canShare({ files: [file] })) {
-        throw new Error('Sharing is not available for this file on this device.');
+        throw new ShareMediaError('share_unavailable', 'Sharing is not available for this file on this device.');
     }
-    try {
-        await navigator.share({ files: [file], title: output.label || 'Save It media' });
-    } catch (error) {
-        if (error?.name !== 'AbortError') {
-            throw error;
-        }
+
+    // This deliberately has no await or asynchronous work before navigator.share().
+    return navigator.share({ files: [file], title });
+}
+
+export function isShareAbortError(error) {
+    return error?.name === 'AbortError';
+}
+
+export function shareErrorMessage(error) {
+    if (isShareAbortError(error)) {
+        return null;
     }
+
+    if (error instanceof ShareMediaError) {
+        return error.message;
+    }
+
+    if (['NotAllowedError', 'SecurityError', 'InvalidStateError', 'TypeError', 'DataError'].includes(error?.name)) {
+        return error?.name === 'NotAllowedError'
+            ? 'Tap Share / Save again to open the share sheet.'
+            : 'The share sheet could not be opened. Please try again.';
+    }
+
+    return 'Sharing could not be prepared.';
 }
