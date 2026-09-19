@@ -641,6 +641,57 @@ class ExtractorClientTest extends TestCase
         ];
     }
 
+    #[DataProvider('instagramServerErrorProvider')]
+    public function test_instagram_server_errors_are_translated_without_internal_details(
+        string $code,
+        int $status,
+        string $expectedMessage,
+    ): void {
+        Http::fake(function (Request $request) use ($code, $status) {
+            return Http::response([
+                'error' => [
+                    'code' => $code,
+                    'message' => 'Sensitive Instagram response and internal path /srv/app.',
+                    'request_id' => $request->data()['request_id'],
+                    'details' => ['provider' => 'instagram'],
+                ],
+            ], $status);
+        });
+
+        $response = $this->postJson('/api/analyze', [
+            'url' => 'https://www.instagram.com/p/Code123/',
+        ])->assertStatus($status)
+            ->assertJsonPath('error.code', $code)
+            ->assertJsonPath('error.message', $expectedMessage);
+
+        $this->assertStringNotContainsString('Sensitive Instagram response', $response->getContent());
+        $this->assertStringNotContainsString('/srv/app', $response->getContent());
+    }
+
+    /**
+     * @return array<string, array{string, int, string}>
+     */
+    public static function instagramServerErrorProvider(): array
+    {
+        return [
+            'response changed' => [
+                'provider_response_changed',
+                502,
+                'Instagram temporarily returned an unsupported metadata format. Please try again later.',
+            ],
+            'rate limited' => [
+                'rate_limited_upstream',
+                503,
+                'Instagram is temporarily rate limiting public metadata requests.',
+            ],
+            'timeout' => [
+                'provider_timeout',
+                503,
+                'Instagram did not respond before the analysis deadline.',
+            ],
+        ];
+    }
+
     public function test_youtube_extraction_maps_formats_and_conversion_plan(): void
     {
         Http::fake(function (Request $request) {

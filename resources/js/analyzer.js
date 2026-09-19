@@ -40,6 +40,29 @@ import {
     releaseOtherPreparedShares as releaseOtherShareSessions,
 } from './share-session.js';
 
+export function shareStateLabel(phase, percent = null) {
+    if (phase === 'preparing') {
+        return 'Preparing…';
+    }
+    if (phase === 'loading') {
+        return Number.isInteger(percent) ? `Loading ${percent}%` : 'Loading…';
+    }
+    if (phase === 'ready') {
+        return 'Tap Again';
+    }
+    if (phase === 'sharing') {
+        return 'Opening…';
+    }
+
+    return 'Share / Save';
+}
+
+export function shareStateAriaLabel(phase, label, outputLabel) {
+    return phase === 'ready'
+        ? `Tap again to share or save ${outputLabel}`
+        : `${label}: ${outputLabel}`;
+}
+
 function browserStorage() {
     try {
         return window.localStorage;
@@ -433,27 +456,13 @@ export function initAnalyzer() {
                 share.setAttribute('aria-label', `Share or save ${output.label}`);
                 const setShareState = ({ phase, percent = null } = {}) => {
                     const loading = phase === 'preparing' || phase === 'loading';
-                    const ready = phase === 'ready';
                     const sharing = phase === 'sharing';
-                    const label = phase === 'preparing'
-                        ? 'Preparing…'
-                        : phase === 'loading'
-                            ? (Number.isInteger(percent) ? `Loading ${percent}%` : 'Loading…')
-                            : ready
-                                ? 'Ready · Share / Save'
-                                : sharing
-                                    ? 'Opening…'
-                                    : 'Share / Save';
+                    const label = shareStateLabel(phase, percent);
 
                     share.textContent = label;
                     share.disabled = loading || sharing;
                     share.classList.toggle('is-loading', loading || sharing);
-                    share.setAttribute(
-                        'aria-label',
-                        ready
-                            ? `Ready to share or save ${output.label}`
-                            : `${label}: ${output.label}`,
-                    );
+                    share.setAttribute('aria-label', shareStateAriaLabel(phase, label, output.label));
                 };
 
                 const markDownloadOnly = (shareError) => {
