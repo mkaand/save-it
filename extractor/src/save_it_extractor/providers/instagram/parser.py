@@ -167,15 +167,19 @@ class _OpenGraphParser(HTMLParser):
         values = {key.lower(): value for key, value in attrs if value is not None}
         key = values.get("property") or values.get("name")
         content = values.get("content")
-        if key in {
-            "medium",
-            "og:url",
-            "og:image",
-            "og:video",
-            "og:title",
-            "og:description",
-            "twitter:player",
-        } and content:
+        if (
+            key
+            in {
+                "medium",
+                "og:url",
+                "og:image",
+                "og:video",
+                "og:title",
+                "og:description",
+                "twitter:player",
+            }
+            and content
+        ):
             self.values.setdefault(key, content)
 
 
