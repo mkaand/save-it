@@ -79,6 +79,18 @@ def parse_instagram_canonical_page(
     metadata = _canonical_meta(document)
     _validate_canonical_identity(metadata.get("og:url"), expected_shortcode, requested_kind)
 
+    if (
+        requested_kind != "p"
+        or metadata.get("medium") != "image"
+        or metadata.get("og:video")
+        or metadata.get("twitter:player")
+    ):
+        raise ProviderError(
+            "provider_response_changed",
+            "Instagram canonical metadata does not confirm a single image post.",
+            502,
+        )
+
     image_url = _safe_url(metadata.get("og:image"))
     if image_url is None:
         raise ProviderError(
@@ -155,7 +167,15 @@ class _OpenGraphParser(HTMLParser):
         values = {key.lower(): value for key, value in attrs if value is not None}
         key = values.get("property") or values.get("name")
         content = values.get("content")
-        if key in {"og:url", "og:image", "og:title", "og:description"} and content:
+        if key in {
+            "medium",
+            "og:url",
+            "og:image",
+            "og:video",
+            "og:title",
+            "og:description",
+            "twitter:player",
+        } and content:
             self.values.setdefault(key, content)
 
 

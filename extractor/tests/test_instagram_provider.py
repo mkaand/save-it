@@ -43,10 +43,20 @@ def document(root: dict[str, Any]) -> str:
     return f'<script>window.__data={{"contextJSON":{json.dumps(json.dumps(payload))}}};</script>'
 
 
-def canonical_document(*, shortcode: str = "Code123", image: str = IMAGE) -> str:
+def canonical_document(
+    *,
+    shortcode: str = "Code123",
+    image: str = IMAGE,
+    medium: str | None = "image",
+    video: str | None = None,
+) -> str:
+    medium_meta = f'<meta name="medium" content="{medium}">' if medium else ""
+    video_meta = f'<meta property="og:video" content="{video}">' if video else ""
     return f'''<!doctype html>
 <meta property="og:url" content="https://www.instagram.com/example/p/{shortcode}/">
 <meta property="og:image" content="{image}?token=one&amp;other=two">
+{medium_meta}
+{video_meta}
 <meta property="og:title" content="Example image">
 <meta property="og:description" content="Structured description">
 '''
@@ -171,23 +181,35 @@ def test_canonical_page_parser_extracts_a_structured_open_graph_image() -> None:
 
 
 @pytest.mark.parametrize(
-    "document_body",
+    ("document_body", "requested_kind"),
     [
-        '<meta property="og:image" content="https://scontent-lhr8-1.cdninstagram.com/image.jpg">',
-        canonical_document(shortcode="Other123"),
-        canonical_document(image="https://cdninstagram.com.evil.example/image.jpg"),
         (
-            '<meta property="og:url" content="https://www.instagram.com:444/p/Code123/">'
-            '<meta property="og:image" '
-            'content="https://scontent-lhr8-1.cdninstagram.com/image.jpg">'
+            '<meta property="og:image" content="https://scontent-lhr8-1.cdninstagram.com/image.jpg">',
+            "p",
+        ),
+        (canonical_document(shortcode="Other123"), "p"),
+        (canonical_document(image="https://cdninstagram.com.evil.example/image.jpg"), "p"),
+        (canonical_document(medium=None), "p"),
+        (canonical_document(medium="carousel"), "p"),
+        (canonical_document(video="https://www.instagram.com/video"), "p"),
+        (canonical_document(), "reel"),
+        (
+            (
+                '<meta property="og:url" '
+                'content="https://www.instagram.com:444/p/Code123/">'
+                '<meta property="og:image" '
+                'content="https://scontent-lhr8-1.cdninstagram.com/image.jpg">'
+            ),
+            "p",
         ),
     ],
 )
 def test_canonical_page_parser_rejects_missing_or_untrusted_structured_metadata(
     document_body: str,
+    requested_kind: str,
 ) -> None:
     with pytest.raises(ProviderError) as rejected:
-        parse_instagram_canonical_page(document_body, "Code123", "p")
+        parse_instagram_canonical_page(document_body, "Code123", requested_kind)
     assert rejected.value.code == "provider_response_changed"
 
 
