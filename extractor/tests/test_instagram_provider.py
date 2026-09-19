@@ -225,9 +225,7 @@ def test_network_client_uses_canonical_path_and_ignores_proxy_env(
     assert seen.url == httpx.URL("https://www.instagram.com/p/Code123/embed/captioned/")
 
     canonical = asyncio.run(
-        InstagramMetadataClient(httpx.MockTransport(handler)).fetch_canonical_page(
-            "p", "Code123"
-        )
+        InstagramMetadataClient(httpx.MockTransport(handler)).fetch_canonical_page("p", "Code123")
     )
     assert "contextJSON" in canonical
     assert seen is not None
