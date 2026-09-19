@@ -33,7 +33,14 @@ class InstagramMetadataClient:
     transport: httpx.AsyncBaseTransport | None = None
 
     async def fetch(self, kind: str, shortcode: str) -> str:
-        url = f"https://www.instagram.com/{kind}/{shortcode}/embed/captioned/"
+        return await self._fetch_page(
+            f"https://www.instagram.com/{kind}/{shortcode}/embed/captioned/"
+        )
+
+    async def fetch_canonical_page(self, kind: str, shortcode: str) -> str:
+        return await self._fetch_page(f"https://www.instagram.com/{kind}/{shortcode}/")
+
+    async def _fetch_page(self, url: str) -> str:
         timeout = httpx.Timeout(
             settings.instagram_read_timeout_seconds,
             connect=settings.instagram_connect_timeout_seconds,

@@ -4,7 +4,10 @@ from urllib.parse import urlsplit
 from save_it_extractor.domain.models import ExtractResult, Provider, ProviderContext
 from save_it_extractor.providers.errors import ProviderError
 from save_it_extractor.providers.instagram.network import InstagramMetadataClient
-from save_it_extractor.providers.instagram.parser import parse_instagram_embed
+from save_it_extractor.providers.instagram.parser import (
+    parse_instagram_canonical_page,
+    parse_instagram_embed,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,7 +20,15 @@ class InstagramProviderAdapter:
         kind, shortcode = parts
         try:
             page = await self.client.fetch(kind, shortcode)
-            metadata, assets, media_type = parse_instagram_embed(page, shortcode, kind)
+            try:
+                metadata, assets, media_type = parse_instagram_embed(page, shortcode, kind)
+            except ProviderError as error:
+                if error.code != "provider_response_changed":
+                    raise
+                canonical_page = await self.client.fetch_canonical_page(kind, shortcode)
+                metadata, assets, media_type = parse_instagram_canonical_page(
+                    canonical_page, shortcode, kind
+                )
         except ProviderError as error:
             raise ProviderError(
                 error.code,

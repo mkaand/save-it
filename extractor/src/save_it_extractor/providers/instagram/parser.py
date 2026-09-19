@@ -2,6 +2,7 @@ import html
 import json
 import re
 from datetime import UTC, datetime
+from html.parser import HTMLParser
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -72,6 +73,61 @@ def parse_instagram_embed(
     return metadata, assets, media_type
 
 
+def parse_instagram_canonical_page(
+    document: str, expected_shortcode: str, requested_kind: str
+) -> tuple[dict, list[dict], str]:
+    metadata = _canonical_meta(document)
+    _validate_canonical_identity(metadata.get("og:url"), expected_shortcode, requested_kind)
+
+    if (
+        requested_kind != "p"
+        or metadata.get("medium") != "image"
+        or metadata.get("og:video")
+        or metadata.get("twitter:player")
+    ):
+        raise ProviderError(
+            "provider_response_changed",
+            "Instagram canonical metadata does not confirm a single image post.",
+            502,
+        )
+
+    image_url = _safe_url(metadata.get("og:image"))
+    if image_url is None:
+        raise ProviderError(
+            "provider_response_changed",
+            "Instagram canonical metadata does not contain a supported image.",
+            502,
+        )
+
+    asset = {
+        "id": "asset-1",
+        "order": 1,
+        "type": "image",
+        "role": "primary",
+        "url": image_url,
+        "thumbnail_url": image_url,
+        "mime_type": _image_mime(image_url),
+        "width": None,
+        "height": None,
+        "duration_ms": None,
+        "alt_text": _clean_text(metadata.get("og:title"), 500),
+        "variants": [],
+    }
+    return (
+        {
+            "post_id": expected_shortcode,
+            "caption": _clean_text(metadata.get("og:description"), 500),
+            "author_name": None,
+            "author_handle": None,
+            "published_at": None,
+            "thumbnail_url": image_url,
+            "media_count": 1,
+        },
+        [asset],
+        "image",
+    )
+
+
 def _shortcode_media(document: str) -> dict[str, Any]:
     cursor = 0
     decoder = json.JSONDecoder()
@@ -98,6 +154,82 @@ def _shortcode_media(document: str) -> dict[str, Any]:
         "Instagram returned metadata in an unsupported format.",
         502,
     )
+
+
+class _OpenGraphParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.values: dict[str, str] = {}
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.lower() != "meta":
+            return
+        values = {key.lower(): value for key, value in attrs if value is not None}
+        key = values.get("property") or values.get("name")
+        content = values.get("content")
+        if (
+            key
+            in {
+                "medium",
+                "og:url",
+                "og:image",
+                "og:video",
+                "og:title",
+                "og:description",
+                "twitter:player",
+            }
+            and content
+        ):
+            self.values.setdefault(key, content)
+
+
+def _canonical_meta(document: str) -> dict[str, str]:
+    parser = _OpenGraphParser()
+    try:
+        parser.feed(document)
+        parser.close()
+    except Exception as exception:
+        raise ProviderError(
+            "provider_response_changed",
+            "Instagram returned invalid canonical metadata.",
+            502,
+        ) from exception
+    return parser.values
+
+
+def _validate_canonical_identity(
+    raw_url: str | None, expected_shortcode: str, requested_kind: str
+) -> None:
+    if not isinstance(raw_url, str):
+        raise ProviderError(
+            "provider_response_changed",
+            "Instagram canonical metadata does not identify the requested post.",
+            502,
+        )
+    try:
+        parsed = urlsplit(raw_url)
+        port = parsed.port
+    except ValueError as exception:
+        raise ProviderError(
+            "provider_response_changed",
+            "Instagram canonical metadata contains an invalid post reference.",
+            502,
+        ) from exception
+    parts = [part for part in parsed.path.split("/") if part]
+    if (
+        parsed.scheme != "https"
+        or (parsed.hostname or "").rstrip(".").lower() != "www.instagram.com"
+        or parsed.username is not None
+        or parsed.password is not None
+        or port is not None
+        or len(parts) < 2
+        or parts[-2:] != [requested_kind, expected_shortcode]
+    ):
+        raise ProviderError(
+            "provider_response_changed",
+            "Instagram canonical metadata does not identify the requested post.",
+            502,
+        )
 
 
 def _media_nodes(media: dict[str, Any]) -> list[dict[str, Any]]:

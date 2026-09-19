@@ -16,7 +16,10 @@ from save_it_extractor.providers.instagram.network import (
     InstagramMetadataClient,
     is_allowed_asset_url,
 )
-from save_it_extractor.providers.instagram.parser import parse_instagram_embed
+from save_it_extractor.providers.instagram.parser import (
+    parse_instagram_canonical_page,
+    parse_instagram_embed,
+)
 
 IMAGE = "https://scontent-lhr8-1.cdninstagram.com/v/t51.2885-15/image.jpg"
 VIDEO = "https://scontent-lhr8-1.cdninstagram.com/o1/v/t16/video.mp4"
@@ -38,6 +41,25 @@ def media_node(*, video: bool = False, suffix: str = "") -> dict[str, Any]:
 def document(root: dict[str, Any]) -> str:
     payload = {"context": {"type": root.get("__typename")}, "gql_data": {"shortcode_media": root}}
     return f'<script>window.__data={{"contextJSON":{json.dumps(json.dumps(payload))}}};</script>'
+
+
+def canonical_document(
+    *,
+    shortcode: str = "Code123",
+    image: str = IMAGE,
+    medium: str | None = "image",
+    video: str | None = None,
+) -> str:
+    medium_meta = f'<meta name="medium" content="{medium}">' if medium else ""
+    video_meta = f'<meta property="og:video" content="{video}">' if video else ""
+    return f'''<!doctype html>
+<meta property="og:url" content="https://www.instagram.com/example/p/{shortcode}/">
+<meta property="og:image" content="{image}?token=one&amp;other=two">
+{medium_meta}
+{video_meta}
+<meta property="og:title" content="Example image">
+<meta property="og:description" content="Structured description">
+'''
 
 
 def root_media(*, kind: str = "image", children: list[dict] | None = None) -> dict:
@@ -145,6 +167,52 @@ def test_parser_rejects_missing_media_mismatch_and_unsafe_assets() -> None:
     assert mismatch.value.code == "provider_response_changed"
 
 
+def test_canonical_page_parser_extracts_a_structured_open_graph_image() -> None:
+    metadata, assets, media_type = parse_instagram_canonical_page(
+        canonical_document(), "Code123", "p"
+    )
+
+    assert media_type == "image"
+    assert metadata["post_id"] == "Code123"
+    assert metadata["media_count"] == 1
+    assert metadata["caption"] == "Structured description"
+    assert assets[0]["url"].startswith("https://scontent-lhr8-1.cdninstagram.com/")
+    assert "&amp;" not in assets[0]["url"]
+
+
+@pytest.mark.parametrize(
+    ("document_body", "requested_kind"),
+    [
+        (
+            '<meta property="og:image" content="https://scontent-lhr8-1.cdninstagram.com/image.jpg">',
+            "p",
+        ),
+        (canonical_document(shortcode="Other123"), "p"),
+        (canonical_document(image="https://cdninstagram.com.evil.example/image.jpg"), "p"),
+        (canonical_document(medium=None), "p"),
+        (canonical_document(medium="carousel"), "p"),
+        (canonical_document(video="https://www.instagram.com/video"), "p"),
+        (canonical_document(), "reel"),
+        (
+            (
+                '<meta property="og:url" '
+                'content="https://www.instagram.com:444/p/Code123/">'
+                '<meta property="og:image" '
+                'content="https://scontent-lhr8-1.cdninstagram.com/image.jpg">'
+            ),
+            "p",
+        ),
+    ],
+)
+def test_canonical_page_parser_rejects_missing_or_untrusted_structured_metadata(
+    document_body: str,
+    requested_kind: str,
+) -> None:
+    with pytest.raises(ProviderError) as rejected:
+        parse_instagram_canonical_page(document_body, "Code123", requested_kind)
+    assert rejected.value.code == "provider_response_changed"
+
+
 def test_asset_host_matching_is_exact_suffix_and_https_only() -> None:
     assert is_allowed_asset_url(IMAGE)
     assert not is_allowed_asset_url("https://cdninstagram.com/image.jpg")
@@ -177,6 +245,13 @@ def test_network_client_uses_canonical_path_and_ignores_proxy_env(
     assert "contextJSON" in page
     assert seen is not None
     assert seen.url == httpx.URL("https://www.instagram.com/p/Code123/embed/captioned/")
+
+    canonical = asyncio.run(
+        InstagramMetadataClient(httpx.MockTransport(handler)).fetch_canonical_page("p", "Code123")
+    )
+    assert "contextJSON" in canonical
+    assert seen is not None
+    assert seen.url == httpx.URL("https://www.instagram.com/p/Code123/")
 
 
 def test_redirect_private_dns_timeout_and_size_are_controlled(
@@ -235,11 +310,37 @@ def test_adapter_returns_ready_contract_without_binary_fetch() -> None:
     assert result.normalized_url == "https://www.instagram.com/p/Code123/"
 
 
+def test_adapter_falls_back_to_canonical_structured_metadata() -> None:
+    class FallbackClient:
+        async def fetch(self, kind: str, shortcode: str) -> str:
+            assert (kind, shortcode) == ("p", "Code123")
+            return '<script>{"contextJSON":null}</script>'
+
+        async def fetch_canonical_page(self, kind: str, shortcode: str) -> str:
+            assert (kind, shortcode) == ("p", "Code123")
+            return canonical_document()
+
+    result = asyncio.run(
+        InstagramProviderAdapter(client=FallbackClient()).extract(
+            classify_url("https://instagram.com/p/Code123/"),
+            "request-instagram-fallback",
+        )
+    )
+
+    assert result.status == "ready"
+    assert result.media_type == "image"
+    assert len(result.assets) == 1
+
+
 def test_adapter_marks_provider_errors_as_instagram_errors() -> None:
     class NullContextClient:
         async def fetch(self, kind: str, shortcode: str) -> str:
             assert (kind, shortcode) == ("p", "Code123")
             return '<script>{"contextJSON":null}</script>'
+
+        async def fetch_canonical_page(self, kind: str, shortcode: str) -> str:
+            assert (kind, shortcode) == ("p", "Code123")
+            return "<html></html>"
 
     with pytest.raises(ProviderError) as changed:
         asyncio.run(
