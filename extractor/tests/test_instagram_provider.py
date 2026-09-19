@@ -176,7 +176,11 @@ def test_canonical_page_parser_extracts_a_structured_open_graph_image() -> None:
         '<meta property="og:image" content="https://scontent-lhr8-1.cdninstagram.com/image.jpg">',
         canonical_document(shortcode="Other123"),
         canonical_document(image="https://cdninstagram.com.evil.example/image.jpg"),
-        '<meta property="og:url" content="https://www.instagram.com:444/p/Code123/"><meta property="og:image" content="https://scontent-lhr8-1.cdninstagram.com/image.jpg">',
+        (
+            '<meta property="og:url" content="https://www.instagram.com:444/p/Code123/">'
+            '<meta property="og:image" '
+            'content="https://scontent-lhr8-1.cdninstagram.com/image.jpg">'
+        ),
     ],
 )
 def test_canonical_page_parser_rejects_missing_or_untrusted_structured_metadata(
