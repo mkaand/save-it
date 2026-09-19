@@ -66,6 +66,11 @@ def root_media(*, kind: str = "image", children: list[dict] | None = None) -> di
             "post",
         ),
         (
+            "https://www.instagram.com/p/Dc7_XyNol8u/?stkn=ZXo4ODB0dGgyZWcy",
+            "https://www.instagram.com/p/Dc7_XyNol8u/",
+            "post",
+        ),
+        (
             "https://www.instagram.com/reel/Reel_456/",
             "https://www.instagram.com/reel/Reel_456/",
             "reel",
@@ -228,6 +233,24 @@ def test_adapter_returns_ready_contract_without_binary_fetch() -> None:
     assert result.media_type == "carousel"
     assert result.capabilities == ["metadata", "media_assets", "multiple_assets"]
     assert result.normalized_url == "https://www.instagram.com/p/Code123/"
+
+
+def test_adapter_marks_provider_errors_as_instagram_errors() -> None:
+    class NullContextClient:
+        async def fetch(self, kind: str, shortcode: str) -> str:
+            assert (kind, shortcode) == ("p", "Code123")
+            return '<script>{"contextJSON":null}</script>'
+
+    with pytest.raises(ProviderError) as changed:
+        asyncio.run(
+            InstagramProviderAdapter(client=NullContextClient()).extract(
+                classify_url("https://instagram.com/p/Code123/"),
+                "request-instagram",
+            )
+        )
+
+    assert changed.value.code == "provider_response_changed"
+    assert changed.value.details == {"provider": "instagram"}
 
 
 @pytest.mark.live

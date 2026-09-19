@@ -105,6 +105,31 @@ final class ExtractorClient
                 );
             }
 
+            if (
+                $provider === MediaPlatform::Instagram->value
+                && is_string($code)
+                && in_array($code, [
+                    'rate_limited_upstream',
+                    'provider_timeout',
+                    'provider_response_changed',
+                    'provider_response_too_large',
+                    'upstream_unavailable',
+                ], true)
+            ) {
+                throw new ExtractorException(
+                    $code,
+                    $response->status() === 502 ? 502 : 503,
+                    $requestId,
+                    match ($code) {
+                        'rate_limited_upstream' => 'Instagram is temporarily rate limiting public metadata requests.',
+                        'provider_timeout' => 'Instagram did not respond before the analysis deadline.',
+                        'provider_response_changed' => 'Instagram temporarily returned an unsupported metadata format. Please try again later.',
+                        'provider_response_too_large' => 'Instagram returned more metadata than the service accepts.',
+                        default => 'Instagram metadata is temporarily unavailable.',
+                    },
+                );
+            }
+
             throw new ExtractorException(
                 'upstream_unavailable',
                 503,

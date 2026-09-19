@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
 from save_it_extractor.domain.models import ExtractResult, Provider, ProviderContext
+from save_it_extractor.providers.errors import ProviderError
 from save_it_extractor.providers.instagram.network import InstagramMetadataClient
 from save_it_extractor.providers.instagram.parser import parse_instagram_embed
 
@@ -14,8 +15,16 @@ class InstagramProviderAdapter:
     async def extract(self, context: ProviderContext, request_id: str) -> ExtractResult:
         parts = [part for part in urlsplit(context.normalized_url).path.split("/") if part]
         kind, shortcode = parts
-        page = await self.client.fetch(kind, shortcode)
-        metadata, assets, media_type = parse_instagram_embed(page, shortcode, kind)
+        try:
+            page = await self.client.fetch(kind, shortcode)
+            metadata, assets, media_type = parse_instagram_embed(page, shortcode, kind)
+        except ProviderError as error:
+            raise ProviderError(
+                error.code,
+                error.message,
+                error.status_code,
+                {**error.details, "provider": Provider.INSTAGRAM.value},
+            ) from error
         capabilities = ["metadata", "media_assets"]
         if len(assets) > 1:
             capabilities.append("multiple_assets")
