@@ -63,6 +63,10 @@ export function shareStateAriaLabel(phase, label, outputLabel) {
         : `${label}: ${outputLabel}`;
 }
 
+export function resetTurnstileChallenge(browserWindow = window) {
+    browserWindow.turnstile?.reset?.();
+}
+
 function browserStorage() {
     try {
         return window.localStorage;
@@ -587,7 +591,10 @@ export function initAnalyzer() {
                     Accept: 'application/json',
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ url: submittedUrl }),
+                body: JSON.stringify({
+                    url: submittedUrl,
+                    'cf-turnstile-response': form.querySelector('[name="cf-turnstile-response"]')?.value || undefined,
+                }),
             });
             const payload = await response.json().catch(() => ({}));
 
@@ -622,6 +629,7 @@ export function initAnalyzer() {
             setStatus('', 'error');
             input.focus();
         } finally {
+            resetTurnstileChallenge();
             setLoading(false);
         }
     }

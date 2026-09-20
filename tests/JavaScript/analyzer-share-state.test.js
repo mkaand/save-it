@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { shareStateAriaLabel, shareStateLabel } from '../../resources/js/analyzer.js';
+import {
+    resetTurnstileChallenge,
+    shareStateAriaLabel,
+    shareStateLabel,
+} from '../../resources/js/analyzer.js';
 
 test('uses the compact Tap Again ready label with an explanatory accessible label', () => {
     assert.equal(shareStateLabel(), 'Share / Save');
@@ -13,4 +17,11 @@ test('uses the compact Tap Again ready label with an explanatory accessible labe
         shareStateAriaLabel('ready', 'Tap Again', '1080p MP4'),
         'Tap again to share or save 1080p MP4',
     );
+});
+
+test('resets an optional Turnstile challenge without affecting disabled installs', () => {
+    let resets = 0;
+    resetTurnstileChallenge({ turnstile: { reset: () => { resets += 1; } } });
+    resetTurnstileChallenge({});
+    assert.equal(resets, 1);
 });

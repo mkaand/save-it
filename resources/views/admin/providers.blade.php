@@ -1,0 +1,3 @@
+@extends('admin.layout')
+@section('title','Providers')
+@section('content')<main class="panel"><h1>Providers</h1><p class="muted">Disabled providers return a controlled temporary-unavailable response.</p><form method="post" action="{{ route('admin.providers.update') }}">@csrf @method('PUT')<div class="checks grid section">@foreach($providers as $provider=>$enabled)<div class="card"><label><input type="checkbox" name="{{ $provider }}" value="1" @checked($enabled)> {{ $provider === 'x' ? 'X' : ucfirst($provider) }}</label><span class="muted">{{ $enabled ? 'Enabled' : 'Disabled' }}</span></div>@endforeach</div><div class="actions"><button class="button button-primary">Save providers</button></div></form></main>@endsection

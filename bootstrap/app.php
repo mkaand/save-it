@@ -1,8 +1,10 @@
 <?php
 
 use App\Http\Controllers\HealthController;
+use App\Http\Middleware\EnsureAdmin;
 use App\Http\Middleware\RedisRateLimit;
 use App\Http\Middleware\RejectMalformedToken;
+use App\Http\Middleware\VerifyTurnstile;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -23,6 +25,8 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'redis.rate' => RedisRateLimit::class,
             'token.format' => RejectMalformedToken::class,
+            'admin' => EnsureAdmin::class,
+            'turnstile' => VerifyTurnstile::class,
         ]);
         $middleware->trustProxies(
             at: ['127.0.0.1', '172.16.0.0/12'],

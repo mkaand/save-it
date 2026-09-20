@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="robots" content="noindex,nofollow"><title>@yield('title', 'Admin') · Save It</title>
+    <style>
+        :root{color-scheme:dark;--bg:#08101d;--panel:#101b2d;--line:#263650;--text:#f5f7fb;--muted:#9fb0c8;--accent:#5eead4;--danger:#fda4af}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 20% 0,#142b41,var(--bg) 42%);color:var(--text);font:15px/1.5 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-height:100vh}a{color:inherit}.admin-shell{max-width:1120px;margin:auto;padding:24px}.admin-nav{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:28px}.brand{font-size:20px;font-weight:800;margin-right:auto;text-decoration:none}.nav-link,.button{border:1px solid var(--line);border-radius:12px;padding:10px 14px;background:#0d1828;color:var(--text);text-decoration:none;font:inherit;cursor:pointer}.nav-link:hover,.button:hover{border-color:var(--accent)}.button-primary{background:var(--accent);color:#06201c;border-color:var(--accent);font-weight:800}.logout{display:inline;margin:0}.panel{background:color-mix(in srgb,var(--panel) 94%,transparent);border:1px solid var(--line);border-radius:20px;padding:clamp(20px,4vw,34px);box-shadow:0 18px 60px #0005}.narrow{max-width:520px;margin:8vh auto}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:16px}.card{border:1px solid var(--line);border-radius:15px;padding:18px;background:#0c1726}.card h2{font-size:17px;margin:0 0 7px}.muted{color:var(--muted)}h1{font-size:clamp(26px,5vw,40px);line-height:1.1;margin:0 0 12px}label{display:block;font-weight:700;margin:16px 0 7px}input,select{width:100%;padding:12px 13px;border-radius:11px;border:1px solid var(--line);background:#07111f;color:var(--text);font:inherit}input:focus,select:focus{outline:2px solid var(--accent);outline-offset:1px}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:22px}.alert{padding:12px 14px;border-radius:11px;margin:0 0 18px;background:#153026;color:#b9f8df}.errors{background:#391722;color:#ffd6dc}.section{margin-top:26px;padding-top:24px;border-top:1px solid var(--line)}.checks label{display:flex;align-items:center;gap:10px;font-weight:600}.checks input{width:auto}.secret-note{font-size:13px;color:var(--muted)}@media(max-width:640px){.admin-shell{padding:16px}.admin-nav{align-items:stretch}.brand{width:100%}.nav-link,.logout .button{text-align:center}.logout{flex:1}.logout .button{width:100%}}
+    </style>
+</head>
+<body><div class="admin-shell">
+@auth
+<nav class="admin-nav" aria-label="Admin navigation"><a class="brand" href="{{ route('admin.home') }}">Save It · Admin</a><a class="nav-link" href="{{ route('admin.home') }}">Home</a><a class="nav-link" href="{{ route('admin.profile') }}">Profile</a><a class="nav-link" href="{{ route('admin.providers') }}">Providers</a><a class="nav-link" href="{{ route('admin.email') }}">Email</a><a class="nav-link" href="{{ route('admin.security') }}">Security</a><form class="logout" method="post" action="{{ route('admin.logout') }}">@csrf<button class="button" type="submit">Logout</button></form></nav>
+@endauth
+@if(session('status'))<div class="alert">{{ session('status') }}</div>@endif
+@if($errors->any())<div class="alert errors" role="alert">{{ $errors->first() }}</div>@endif
+@yield('content')
+</div></body></html>
