@@ -9,7 +9,7 @@ use App\Http\Controllers\Previews\RecentPreviewController;
 use Illuminate\Support\Facades\Route;
 
 Route::post('/analyze', AnalyzeController::class)
-    ->middleware('redis.rate:analyze')
+    ->middleware(['redis.rate:analyze', 'turnstile'])
     ->name('api.analyze');
 
 Route::get('/downloads/{token}', DownloadController::class)

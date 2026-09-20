@@ -5,10 +5,12 @@ namespace App\Services;
 use App\Enums\MediaPlatform;
 use App\Services\Downloads\DownloadAssetStore;
 use App\Services\Extractor\ExtractorClient;
+use App\Services\Extractor\ExtractorException;
 use App\Services\Extractor\ExtractorRecognition;
 use App\Services\Previews\PrimaryPreviewResolver;
 use App\Services\Previews\PrimaryPreviewSelection;
 use App\Services\Previews\RecentPreviewStore;
+use App\Services\Settings\ProviderControl;
 
 final class MediaUrlAnalyzer
 {
@@ -17,6 +19,7 @@ final class MediaUrlAnalyzer
         private readonly DownloadAssetStore $downloads,
         private readonly RecentPreviewStore $previews,
         private readonly PrimaryPreviewResolver $primaryPreviews,
+        private readonly ProviderControl $providerControl,
     ) {}
 
     /**
@@ -36,6 +39,15 @@ final class MediaUrlAnalyzer
     {
         $recognition = $this->extractor->recognize(trim($input));
         $platform = $recognition->platform;
+        $provider = $platform === MediaPlatform::YouTubeShorts ? 'youtube' : $platform->value;
+        if (in_array($provider, ProviderControl::PROVIDERS, true) && ! $this->providerControl->enabled($provider)) {
+            throw new ExtractorException(
+                'provider_disabled',
+                503,
+                $recognition->requestId,
+                'This provider is temporarily disabled.',
+            );
+        }
 
         if (
             $recognition->status === 'ready'

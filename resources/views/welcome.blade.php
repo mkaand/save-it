@@ -50,6 +50,9 @@
         })();
     </script>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
+    @if(app(\App\Services\Settings\Turnstile::class)->active())
+        <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+    @endif
     @if (app()->environment('production')
         && config('services.umami.enabled')
         && config('services.umami.script_url') === 'https://stats.allmy.win/script.js'
@@ -183,6 +186,10 @@
                         </div>
                         <p class="field-help" id="url-help">Use an HTTP or HTTPS link from the platform roadmap.</p>
                         <p class="field-error" id="url-error" role="alert" data-url-error hidden></p>
+
+                        @if(app(\App\Services\Settings\Turnstile::class)->active())
+                            <div class="cf-turnstile" data-sitekey="{{ app(\App\Services\Settings\Turnstile::class)->siteKey() }}"></div>
+                        @endif
 
                         <button class="analyze-button" type="submit" data-analyze-button>
                             <span data-analyze-label>Analyze URL</span>

@@ -31,7 +31,7 @@ final class SensitiveLogSanitizer
 
     private function sensitiveKey(string $key): bool
     {
-        return preg_match('/authorization|cookie|secret|password|token|api[_-]?key/i', $key) === 1;
+        return preg_match('/authorization|cookie|secret|password|token|turnstile|api[_-]?key/i', $key) === 1;
     }
 
     private function string(string $value): string

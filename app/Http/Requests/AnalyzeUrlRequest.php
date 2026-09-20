@@ -18,6 +18,7 @@ class AnalyzeUrlRequest extends FormRequest
     {
         return [
             'url' => ['bail', 'required', 'string', 'max:2048'],
+            'cf-turnstile-response' => ['nullable', 'string', 'max:2048'],
         ];
     }
 

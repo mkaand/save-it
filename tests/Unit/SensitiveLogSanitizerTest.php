@@ -19,7 +19,11 @@ final class SensitiveLogSanitizerTest extends TestCase
             channel: 'test',
             level: Level::Warning,
             message: 'Authorization: Bearer secret /api/downloads/'.str_repeat('a', 48).'.'.str_repeat('b', 64).'?sig=value',
-            context: ['cookie' => 'session=value', 'provider' => 'instagram'],
+            context: [
+                'cookie' => 'session=value',
+                'cf-turnstile-response' => 'one-time-challenge-token',
+                'provider' => 'instagram',
+            ],
         );
 
         $safe = (new SensitiveLogSanitizer)($record);
@@ -27,6 +31,7 @@ final class SensitiveLogSanitizerTest extends TestCase
         $this->assertStringNotContainsString('secret', $safe->message);
         $this->assertStringNotContainsString('value', $safe->message);
         $this->assertSame('[REDACTED]', $safe->context['cookie']);
+        $this->assertSame('[REDACTED]', $safe->context['cf-turnstile-response']);
         $this->assertSame('instagram', $safe->context['provider']);
     }
 }

@@ -1,0 +1,3 @@
+@extends('admin.layout')
+@section('title','Reset password')
+@section('content')<main class="panel narrow"><h1>Reset password</h1><form method="post" action="{{ route('admin.password.update') }}">@csrf<input type="hidden" name="token" value="{{ $token }}"><label>Email</label><input name="email" type="email" value="{{ $email }}" required><label>New password</label><input name="password" type="password" autocomplete="new-password" required><label>Confirm password</label><input name="password_confirmation" type="password" autocomplete="new-password" required><div class="actions"><button class="button button-primary">Reset password</button></div></form></main>@endsection
