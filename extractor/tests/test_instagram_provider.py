@@ -22,6 +22,7 @@ from save_it_extractor.providers.instagram.parser import (
 )
 
 IMAGE = "https://scontent-lhr8-1.cdninstagram.com/v/t51.2885-15/image.jpg"
+ORIGINAL_IMAGE = "https://scontent-lhr8-1.cdninstagram.com/v/t51.2885-15/original.jpg"
 VIDEO = "https://scontent-lhr8-1.cdninstagram.com/o1/v/t16/video.mp4"
 
 
@@ -49,9 +50,37 @@ def canonical_document(
     image: str = IMAGE,
     medium: str | None = "image",
     video: str | None = None,
+    state_shortcode: str | None = None,
+    state_media_type: int = 1,
+    state_image: str = ORIGINAL_IMAGE,
+    include_state: bool = True,
 ) -> str:
     medium_meta = f'<meta name="medium" content="{medium}">' if medium else ""
     video_meta = f'<meta property="og:video" content="{video}">' if video else ""
+    state = ""
+    if include_state:
+        state = (
+            '<script type="application/json">'
+            + json.dumps(
+                {
+                    "data": {
+                        "media": {
+                            "code": state_shortcode or shortcode,
+                            "media_type": state_media_type,
+                            "original_width": 1560,
+                            "original_height": 2080,
+                            "image_versions2": {
+                                "candidates": [
+                                    {"url": state_image},
+                                    {"url": image},
+                                ]
+                            },
+                        }
+                    }
+                }
+            )
+            + "</script>"
+        )
     return f'''<!doctype html>
 <meta property="og:url" content="https://www.instagram.com/example/p/{shortcode}/">
 <meta property="og:image" content="{image}?token=one&amp;other=two">
@@ -59,6 +88,7 @@ def canonical_document(
 {video_meta}
 <meta property="og:title" content="Example image">
 <meta property="og:description" content="Structured description">
+{state}
 '''
 
 
@@ -167,7 +197,7 @@ def test_parser_rejects_missing_media_mismatch_and_unsafe_assets() -> None:
     assert mismatch.value.code == "provider_response_changed"
 
 
-def test_canonical_page_parser_extracts_a_structured_open_graph_image() -> None:
+def test_canonical_page_parser_uses_verified_full_size_structured_image() -> None:
     metadata, assets, media_type = parse_instagram_canonical_page(
         canonical_document(), "Code123", "p"
     )
@@ -176,7 +206,10 @@ def test_canonical_page_parser_extracts_a_structured_open_graph_image() -> None:
     assert metadata["post_id"] == "Code123"
     assert metadata["media_count"] == 1
     assert metadata["caption"] == "Structured description"
-    assert assets[0]["url"].startswith("https://scontent-lhr8-1.cdninstagram.com/")
+    assert assets[0]["url"] == ORIGINAL_IMAGE
+    assert assets[0]["thumbnail_url"] == ORIGINAL_IMAGE
+    assert assets[0]["width"] == 1560
+    assert assets[0]["height"] == 2080
     assert "&amp;" not in assets[0]["url"]
 
 
@@ -193,6 +226,9 @@ def test_canonical_page_parser_extracts_a_structured_open_graph_image() -> None:
         (canonical_document(medium="carousel"), "p"),
         (canonical_document(video="https://www.instagram.com/video"), "p"),
         (canonical_document(), "reel"),
+        (canonical_document(include_state=False), "p"),
+        (canonical_document(state_shortcode="Other123"), "p"),
+        (canonical_document(state_media_type=8), "p"),
         (
             (
                 '<meta property="og:url" '

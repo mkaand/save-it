@@ -1,6 +1,7 @@
 import html
 import json
 import re
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from html.parser import HTMLParser
 from typing import Any
@@ -76,7 +77,7 @@ def parse_instagram_embed(
 def parse_instagram_canonical_page(
     document: str, expected_shortcode: str, requested_kind: str
 ) -> tuple[dict, list[dict], str]:
-    metadata = _canonical_meta(document)
+    metadata, state_documents = _canonical_page_data(document)
     _validate_canonical_identity(metadata.get("og:url"), expected_shortcode, requested_kind)
 
     if (
@@ -91,13 +92,14 @@ def parse_instagram_canonical_page(
             502,
         )
 
-    image_url = _safe_url(metadata.get("og:image"))
-    if image_url is None:
+    if _safe_url(metadata.get("og:image")) is None:
         raise ProviderError(
             "provider_response_changed",
             "Instagram canonical metadata does not contain a supported image.",
             502,
         )
+
+    image_url, width, height = _canonical_image_source(state_documents, expected_shortcode)
 
     asset = {
         "id": "asset-1",
@@ -107,8 +109,8 @@ def parse_instagram_canonical_page(
         "url": image_url,
         "thumbnail_url": image_url,
         "mime_type": _image_mime(image_url),
-        "width": None,
-        "height": None,
+        "width": width,
+        "height": height,
         "duration_ms": None,
         "alt_text": _clean_text(metadata.get("og:title"), 500),
         "variants": [],
@@ -156,15 +158,21 @@ def _shortcode_media(document: str) -> dict[str, Any]:
     )
 
 
-class _OpenGraphParser(HTMLParser):
+class _CanonicalPageParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.values: dict[str, str] = {}
+        self.state_documents: list[str] = []
+        self._state_document: list[str] | None = None
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        values = {key.lower(): value for key, value in attrs if value is not None}
+        if tag.lower() == "script":
+            if values.get("type") == "application/json":
+                self._state_document = []
+            return
         if tag.lower() != "meta":
             return
-        values = {key.lower(): value for key, value in attrs if value is not None}
         key = values.get("property") or values.get("name")
         content = values.get("content")
         if (
@@ -182,9 +190,19 @@ class _OpenGraphParser(HTMLParser):
         ):
             self.values.setdefault(key, content)
 
+    def handle_data(self, data: str) -> None:
+        if self._state_document is not None:
+            self._state_document.append(data)
 
-def _canonical_meta(document: str) -> dict[str, str]:
-    parser = _OpenGraphParser()
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() != "script" or self._state_document is None:
+            return
+        self.state_documents.append("".join(self._state_document))
+        self._state_document = None
+
+
+def _canonical_page_data(document: str) -> tuple[dict[str, str], list[str]]:
+    parser = _CanonicalPageParser()
     try:
         parser.feed(document)
         parser.close()
@@ -194,7 +212,50 @@ def _canonical_meta(document: str) -> dict[str, str]:
             "Instagram returned invalid canonical metadata.",
             502,
         ) from exception
-    return parser.values
+    return parser.values, parser.state_documents
+
+
+def _canonical_image_source(
+    state_documents: list[str], expected_shortcode: str
+) -> tuple[str, int, int]:
+    for document in state_documents:
+        try:
+            state = json.loads(document)
+        except json.JSONDecodeError:
+            continue
+        for node in _json_objects(state):
+            if node.get("code") != expected_shortcode or node.get("media_type") != 1:
+                continue
+            image_versions = node.get("image_versions2")
+            candidates = (
+                image_versions.get("candidates") if isinstance(image_versions, dict) else None
+            )
+            if not isinstance(candidates, list) or not candidates:
+                continue
+            source = _safe_url(
+                candidates[0].get("url") if isinstance(candidates[0], dict) else None
+            )
+            width = _positive_int(node.get("original_width"))
+            height = _positive_int(node.get("original_height"))
+            if source is not None and width is not None and height is not None:
+                return source, width, height
+
+    raise ProviderError(
+        "provider_response_changed",
+        "Instagram canonical metadata does not contain a verified full-size image.",
+        502,
+    )
+
+
+def _json_objects(value: Any) -> Iterator[dict[str, Any]]:
+    pending = [value]
+    while pending:
+        current = pending.pop()
+        if isinstance(current, dict):
+            yield current
+            pending.extend(current.values())
+        elif isinstance(current, list):
+            pending.extend(current)
 
 
 def _validate_canonical_identity(
