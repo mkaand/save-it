@@ -17,6 +17,10 @@ return [
 
     'default' => env('CACHE_STORE', 'database'),
 
+    // Rate limits must be shared by every app/worker process. Redis is the
+    // portable production default; tests may override this through config.
+    'limiter' => env('CACHE_LIMITER', env('CACHE_STORE', 'database')),
+
     /*
     |--------------------------------------------------------------------------
     | Cache Stores

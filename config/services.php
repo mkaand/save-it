@@ -58,6 +58,16 @@ return [
         'share_ffmpeg_binary' => '/usr/bin/ffmpeg',
     ],
 
+    'abuse_limits' => [
+        'analyze' => (int) env('ABUSE_LIMIT_ANALYZE_PER_MINUTE', 30),
+        'download' => (int) env('ABUSE_LIMIT_DOWNLOAD_PER_MINUTE', 120),
+        'share' => (int) env('ABUSE_LIMIT_SHARE_PER_MINUTE', 20),
+        'job_create' => (int) env('ABUSE_LIMIT_JOB_CREATE_PER_MINUTE', 20),
+        'job_poll' => (int) env('ABUSE_LIMIT_JOB_POLL_PER_MINUTE', 120),
+        'preview' => (int) env('ABUSE_LIMIT_PREVIEW_PER_MINUTE', 60),
+        'invalid_token' => (int) env('ABUSE_LIMIT_INVALID_TOKEN_PER_MINUTE', 15),
+    ],
+
     'umami' => [
         'enabled' => (bool) env('UMAMI_ENABLED', false),
         'script_url' => env('UMAMI_SCRIPT_URL'),
