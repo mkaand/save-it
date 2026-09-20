@@ -1,14 +1,21 @@
-import asyncio
-import ipaddress
 import json
-import socket
 from dataclasses import dataclass
 from hashlib import sha256
-from urllib.parse import urlencode, urljoin, urlsplit
+from urllib.parse import urlencode, urljoin
 
 import httpx
 
 from save_it_extractor.config import settings
+from save_it_extractor.providers.egress import (
+    EgressPolicyError,
+    EgressResponseTooLarge,
+    PinnedAsyncHTTPTransport,
+    ResolvedRemote,
+    content_type,
+    is_allowed_url,
+    read_limited,
+    resolve_allowed_url,
+)
 from save_it_extractor.providers.errors import ProviderError
 
 METADATA_HOSTS = frozenset({"cdn.syndication.twimg.com"})
@@ -16,18 +23,7 @@ ASSET_HOSTS = frozenset({"pbs.twimg.com", "video.twimg.com"})
 
 
 def is_allowed_asset_url(raw_url: str) -> bool:
-    try:
-        parsed = urlsplit(raw_url)
-        return (
-            parsed.scheme == "https"
-            and parsed.hostname is not None
-            and parsed.hostname.lower() in ASSET_HOSTS
-            and parsed.username is None
-            and parsed.password is None
-            and parsed.port is None
-        )
-    except ValueError:
-        return False
+    return is_allowed_url(raw_url, ASSET_HOSTS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,18 +39,21 @@ class XMetadataClient:
             connect=settings.x_connect_timeout_seconds,
         )
 
+        pinned_transport = PinnedAsyncHTTPTransport() if self.transport is None else None
         async with httpx.AsyncClient(
             timeout=timeout,
             trust_env=False,
             follow_redirects=False,
-            transport=self.transport,
+            transport=self.transport or pinned_transport,
             headers={
                 "Accept": "application/json",
                 "User-Agent": "Save-It-Metadata-Extractor/1 (+https://github.com/mkaand/save-it)",
             },
         ) as client:
             for redirect_count in range(settings.x_max_redirects + 1):
-                await _validate_remote_url(url)
+                remote = await _validate_remote_url(url)
+                if pinned_transport is not None:
+                    pinned_transport.pin(remote)
                 try:
                     async with client.stream("GET", url) as response:
                         if response.is_redirect:
@@ -99,23 +98,21 @@ class XMetadataClient:
                                 503,
                             )
 
-                        content_type = response.headers.get("content-type", "").lower()
-                        if "json" not in content_type:
+                        if "json" not in content_type(response.headers.get("content-type", "")):
                             raise ProviderError(
                                 "provider_response_changed",
                                 "X returned an unexpected metadata response.",
                                 502,
                             )
 
-                        body = bytearray()
-                        async for chunk in response.aiter_bytes():
-                            body.extend(chunk)
-                            if len(body) > settings.x_max_metadata_bytes:
-                                raise ProviderError(
-                                    "provider_response_too_large",
-                                    "X returned more metadata than the service accepts.",
-                                    502,
-                                )
+                        try:
+                            body = await read_limited(response, settings.x_max_metadata_bytes)
+                        except EgressResponseTooLarge as exception:
+                            raise ProviderError(
+                                "provider_response_too_large",
+                                "X returned more metadata than the service accepts.",
+                                502,
+                            ) from exception
 
                         try:
                             payload = json.loads(body)
@@ -149,53 +146,14 @@ class XMetadataClient:
         raise ProviderError("upstream_unavailable", "X metadata is unavailable.", 503)
 
 
-async def _validate_remote_url(raw_url: str) -> None:
-    parsed = urlsplit(raw_url)
+async def _validate_remote_url(raw_url: str) -> ResolvedRemote:
     try:
-        port = parsed.port
-    except ValueError as exception:
+        return await resolve_allowed_url(raw_url, METADATA_HOSTS)
+    except EgressPolicyError as exception:
+        if exception.reason == "dns_unavailable":
+            raise ProviderError(
+                "upstream_unavailable", "X metadata is unavailable.", 503
+            ) from exception
         raise ProviderError(
             "disallowed_redirect", "X returned an unsafe redirect.", 502
         ) from exception
-
-    hostname = (parsed.hostname or "").rstrip(".").lower()
-    if (
-        parsed.scheme != "https"
-        or hostname not in METADATA_HOSTS
-        or parsed.username is not None
-        or parsed.password is not None
-        or port is not None
-    ):
-        raise ProviderError("disallowed_redirect", "X returned an unsafe redirect.", 502)
-
-    try:
-        records = await asyncio.to_thread(
-            socket.getaddrinfo,
-            hostname,
-            443,
-            type=socket.SOCK_STREAM,
-        )
-    except socket.gaierror as exception:
-        raise ProviderError(
-            "upstream_unavailable", "X metadata is unavailable.", 503
-        ) from exception
-
-    if not records:
-        raise ProviderError("upstream_unavailable", "X metadata is unavailable.", 503)
-
-    for record in records:
-        address = ipaddress.ip_address(record[4][0])
-        if (
-            not address.is_global
-            or address.is_loopback
-            or address.is_private
-            or address.is_link_local
-            or address.is_multicast
-            or address.is_reserved
-            or address.is_unspecified
-        ):
-            raise ProviderError(
-                "disallowed_redirect",
-                "X metadata resolved to a disallowed network address.",
-                502,
-            )

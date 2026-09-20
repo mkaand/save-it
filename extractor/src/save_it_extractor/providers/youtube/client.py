@@ -90,6 +90,7 @@ class YouTubeMetadataClient:
             "cookiefile": None,
             "download": False,
             "extract_flat": False,
+            "allowed_extractors": ["Youtube"],
             "fragment_retries": 0,
             "ignoreconfig": True,
             "logger": _QuietLogger(),
@@ -111,6 +112,11 @@ class YouTubeMetadataClient:
             "js_runtimes": {},
             "remote_components": set(),
         }
+
+        # yt-dlp owns its metadata networking stack and does not expose a
+        # per-request DNS pinning hook. Canonical input is restricted here and
+        # every returned media URL is revalidated by Save It's pinned delivery
+        # policy before any binary request is made.
 
         try:
             with self.extractor_factory(options) as extractor:

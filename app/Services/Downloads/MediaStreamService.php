@@ -203,6 +203,7 @@ final class MediaStreamService
         $redirects = max(0, (int) config('services.downloads.max_redirects'));
         for ($attempt = 0; $attempt <= $redirects; $attempt++) {
             $url = $this->policy->validate($url, $provider);
+            $curlResolve = UpstreamUrlPolicy::curlResolveFor($url, $provider);
             $request = Http::accept('*/*')
                 ->connectTimeout((float) config('services.downloads.connect_timeout_seconds'))
                 ->timeout((float) config('services.downloads.timeout_seconds'))
@@ -210,6 +211,7 @@ final class MediaStreamService
                     'allow_redirects' => false,
                     'stream' => true,
                     'proxy' => '',
+                    'curl' => [CURLOPT_RESOLVE => $curlResolve],
                 ]);
             if ($range !== null) {
                 $request = $request->withHeader('Range', $range);

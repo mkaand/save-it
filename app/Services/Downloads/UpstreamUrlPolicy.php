@@ -5,6 +5,9 @@ namespace App\Services\Downloads;
 class UpstreamUrlPolicy
 {
     /** @var array<string, array<int, string>> */
+    private static array $pinnedResolvers = [];
+
+    /** @var array<string, array<int, string>> */
     private const HOSTS = [
         'x' => ['pbs.twimg.com', 'video.twimg.com'],
         'instagram' => ['.cdninstagram.com', '.fbcdn.net'],
@@ -43,9 +46,45 @@ class UpstreamUrlPolicy
                     throw $this->unsafe();
                 }
             }
+            self::$pinnedResolvers[$this->cacheKey($url, $provider)] = $this->curlResolve($host, $addresses);
         }
 
         return $url;
+    }
+
+    /** @return array{url: string, curl_resolve: array<int, string>} */
+    public function prepareRequest(string $url, string $provider): array
+    {
+        $this->validate($url, $provider, false);
+        $host = strtolower((string) parse_url($url, PHP_URL_HOST));
+        $addresses = $this->resolveAddresses($host);
+        if ($addresses === []) {
+            throw new DownloadException(
+                'upstream_unavailable',
+                503,
+                'The media source is temporarily unavailable.',
+            );
+        }
+        foreach ($addresses as $address) {
+            if (! $this->isPublicAddress($address)) {
+                throw $this->unsafe();
+            }
+        }
+
+        $pinned = array_map(fn (string $address): string => str_contains($address, ':')
+            ? "[{$address}]"
+            : $address, $addresses);
+
+        return [
+            'url' => $url,
+            'curl_resolve' => ["{$host}:443:".implode(',', $pinned)],
+        ];
+    }
+
+    /** @return array<int, string> */
+    public static function curlResolveFor(string $url, string $provider): array
+    {
+        return self::$pinnedResolvers[self::cacheKey($url, $provider)] ?? [];
     }
 
     public function redirect(string $baseUrl, string $location, string $provider): string
@@ -89,11 +128,36 @@ class UpstreamUrlPolicy
 
     private function isPublicAddress(string $address): bool
     {
+        $packed = @inet_pton($address);
+        if ($packed === false) {
+            return false;
+        }
+        if (strlen($packed) === 16 && substr($packed, 0, 12) === str_repeat("\0", 10)."\xff\xff") {
+            return false;
+        }
+
         return filter_var(
             $address,
             FILTER_VALIDATE_IP,
             FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE,
         ) !== false;
+    }
+
+    /** @param array<int, string> $addresses
+     * @return array<int, string>
+     */
+    private function curlResolve(string $host, array $addresses): array
+    {
+        $pinned = array_map(fn (string $address): string => str_contains($address, ':')
+            ? "[{$address}]"
+            : $address, $addresses);
+
+        return ["{$host}:443:".implode(',', $pinned)];
+    }
+
+    private static function cacheKey(string $url, string $provider): string
+    {
+        return $provider.'|'.$url;
     }
 
     private function unsafe(): DownloadException
