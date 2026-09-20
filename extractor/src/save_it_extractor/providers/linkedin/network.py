@@ -1,11 +1,19 @@
-import ipaddress
-import socket
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlsplit
 
 import httpx
 
 from save_it_extractor.config import settings
+from save_it_extractor.providers.egress import (
+    EgressPolicyError,
+    EgressResponseTooLarge,
+    PinnedAsyncHTTPTransport,
+    ResolvedRemote,
+    content_type,
+    is_allowed_url,
+    read_limited,
+    resolve_allowed_url,
+)
 from save_it_extractor.providers.errors import ProviderError
 
 METADATA_HOSTS = frozenset({"www.linkedin.com", "linkedin.com", "m.linkedin.com"})
@@ -14,19 +22,7 @@ AUTH_PATH_PREFIXES = ("/authwall", "/checkpoint", "/login", "/uas/login")
 
 
 def is_allowed_asset_url(raw_url: str) -> bool:
-    try:
-        parsed = urlsplit(raw_url)
-        hostname = (parsed.hostname or "").rstrip(".").lower()
-        return (
-            parsed.scheme == "https"
-            and hostname.endswith(".licdn.com")
-            and hostname != "licdn.com"
-            and parsed.username is None
-            and parsed.password is None
-            and parsed.port is None
-        )
-    except ValueError:
-        return False
+    return is_allowed_url(raw_url, {".licdn.com"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,11 +36,12 @@ class LinkedInMetadataClient:
             connect=settings.linkedin_connect_timeout_seconds,
         )
 
+        pinned_transport = PinnedAsyncHTTPTransport() if self.transport is None else None
         async with httpx.AsyncClient(
             timeout=timeout,
             trust_env=False,
             follow_redirects=False,
-            transport=self.transport,
+            transport=self.transport or pinned_transport,
             headers={
                 "Accept": "text/html,application/xhtml+xml",
                 "Accept-Language": "en",
@@ -52,7 +49,9 @@ class LinkedInMetadataClient:
             },
         ) as client:
             for redirect_count in range(settings.linkedin_max_redirects + 1):
-                await _validate_remote_url(url)
+                remote = await _validate_remote_url(url)
+                if pinned_transport is not None:
+                    pinned_transport.pin(remote)
                 try:
                     async with client.stream("GET", url) as response:
                         if response.is_redirect:
@@ -128,13 +127,10 @@ class LinkedInMetadataClient:
                                 {"provider": "linkedin"},
                             )
 
-                        content_type = (
-                            response.headers.get("content-type", "")
-                            .split(";", 1)[0]
-                            .strip()
-                            .lower()
-                        )
-                        if content_type not in {"text/html", "application/xhtml+xml"}:
+                        if content_type(response.headers.get("content-type", "")) not in {
+                            "text/html",
+                            "application/xhtml+xml",
+                        }:
                             raise ProviderError(
                                 "parsing_failed",
                                 "LinkedIn returned an unsupported metadata response.",
@@ -142,16 +138,17 @@ class LinkedInMetadataClient:
                                 {"provider": "linkedin"},
                             )
 
-                        body = bytearray()
-                        async for chunk in response.aiter_bytes():
-                            body.extend(chunk)
-                            if len(body) > settings.linkedin_max_metadata_bytes:
-                                raise ProviderError(
-                                    "provider_response_too_large",
-                                    "LinkedIn returned more metadata than the service accepts.",
-                                    502,
-                                    {"provider": "linkedin"},
-                                )
+                        try:
+                            body = await read_limited(
+                                response, settings.linkedin_max_metadata_bytes
+                            )
+                        except EgressResponseTooLarge as exception:
+                            raise ProviderError(
+                                "provider_response_too_large",
+                                "LinkedIn returned more metadata than the service accepts.",
+                                502,
+                                {"provider": "linkedin"},
+                            ) from exception
 
                         try:
                             return body.decode("utf-8")
@@ -191,17 +188,20 @@ class LinkedInMetadataClient:
             settings.linkedin_read_timeout_seconds,
             connect=settings.linkedin_connect_timeout_seconds,
         )
+        pinned_transport = PinnedAsyncHTTPTransport() if self.transport is None else None
         async with httpx.AsyncClient(
             timeout=timeout,
             trust_env=False,
             follow_redirects=False,
-            transport=self.transport,
+            transport=self.transport or pinned_transport,
             headers={
                 "User-Agent": "Save-It-Metadata-Extractor/1 (+https://github.com/mkaand/save-it)"
             },
         ) as client:
             for redirect_count in range(settings.linkedin_max_redirects + 1):
-                await _validate_redirect_url(url, allow_short=redirect_count == 0)
+                remote = await _validate_redirect_url(url, allow_short=redirect_count == 0)
+                if pinned_transport is not None:
+                    pinned_transport.pin(remote)
                 try:
                     response = await client.get(url)
                 except httpx.TimeoutException as exception:
@@ -265,31 +265,12 @@ def _is_auth_url(raw_url: str) -> bool:
     return any(path.startswith(prefix) for prefix in AUTH_PATH_PREFIXES)
 
 
-async def _validate_remote_url(raw_url: str) -> None:
-    await _validate_redirect_url(raw_url, allow_short=False)
+async def _validate_remote_url(raw_url: str) -> ResolvedRemote:
+    return await _validate_redirect_url(raw_url, allow_short=False)
 
 
-async def _validate_redirect_url(raw_url: str, *, allow_short: bool) -> None:
-    parsed = urlsplit(raw_url)
-    try:
-        port = parsed.port
-    except ValueError as exception:
-        raise ProviderError(
-            "disallowed_redirect",
-            "LinkedIn returned an unsafe redirect.",
-            502,
-            {"provider": "linkedin"},
-        ) from exception
-
-    hostname = (parsed.hostname or "").rstrip(".").lower()
-    if (
-        parsed.scheme != "https"
-        or hostname not in (METADATA_HOSTS | ({SHORT_LINK_HOST} if allow_short else set()))
-        or parsed.username is not None
-        or parsed.password is not None
-        or port is not None
-        or _is_auth_url(raw_url)
-    ):
+async def _validate_redirect_url(raw_url: str, *, allow_short: bool) -> ResolvedRemote:
+    if _is_auth_url(raw_url):
         raise ProviderError(
             "disallowed_redirect",
             "LinkedIn returned an unsafe redirect.",
@@ -297,42 +278,20 @@ async def _validate_redirect_url(raw_url: str, *, allow_short: bool) -> None:
             {"provider": "linkedin"},
         )
 
+    allowed_hosts = METADATA_HOSTS | ({SHORT_LINK_HOST} if allow_short else set())
     try:
-        records = socket.getaddrinfo(
-            hostname,
-            443,
-            type=socket.SOCK_STREAM,
-        )
-    except socket.gaierror as exception:
-        raise ProviderError(
-            "temporary_provider_error",
-            "LinkedIn metadata is temporarily unavailable.",
-            503,
-            {"provider": "linkedin"},
-        ) from exception
-
-    if not records:
-        raise ProviderError(
-            "temporary_provider_error",
-            "LinkedIn metadata is temporarily unavailable.",
-            503,
-            {"provider": "linkedin"},
-        )
-
-    for record in records:
-        address = ipaddress.ip_address(record[4][0])
-        if (
-            not address.is_global
-            or address.is_loopback
-            or address.is_private
-            or address.is_link_local
-            or address.is_multicast
-            or address.is_reserved
-            or address.is_unspecified
-        ):
+        return await resolve_allowed_url(raw_url, allowed_hosts)
+    except EgressPolicyError as exception:
+        if exception.reason == "dns_unavailable":
             raise ProviderError(
-                "disallowed_redirect",
-                "LinkedIn metadata resolved to a disallowed network address.",
-                502,
+                "temporary_provider_error",
+                "LinkedIn metadata is temporarily unavailable.",
+                503,
                 {"provider": "linkedin"},
-            )
+            ) from exception
+        raise ProviderError(
+            "disallowed_redirect",
+            "LinkedIn returned an unsafe redirect.",
+            502,
+            {"provider": "linkedin"},
+        ) from exception

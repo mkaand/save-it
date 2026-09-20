@@ -64,4 +64,47 @@ class UpstreamUrlPolicyTest extends TestCase
             $this->assertSame('unsafe_media_source', $exception->publicCode);
         }
     }
+
+    #[DataProvider('unsafeAddressProvider')]
+    public function test_it_rejects_unsafe_ipv4_and_ipv6_dns_answers(string $address): void
+    {
+        $policy = new class($address) extends UpstreamUrlPolicy
+        {
+            public function __construct(private readonly string $address) {}
+
+            protected function resolveAddresses(string $host): array
+            {
+                return [$this->address];
+            }
+        };
+
+        $this->expectException(DownloadException::class);
+        $policy->prepareRequest('https://video.twimg.com/file.mp4', 'x');
+    }
+
+    public static function unsafeAddressProvider(): array
+    {
+        return [
+            'loopback v4' => ['127.0.0.1'],
+            'private v4' => ['10.0.0.1'],
+            'loopback v6' => ['::1'],
+            'private v6' => ['fc00::1'],
+            'reserved v6' => ['2001:db8::1'],
+            'mapped v6' => ['::ffff:8.8.8.8'],
+        ];
+    }
+
+    public function test_it_rejects_mixed_public_and_private_dns_answers(): void
+    {
+        $policy = new class extends UpstreamUrlPolicy
+        {
+            protected function resolveAddresses(string $host): array
+            {
+                return ['8.8.8.8', '127.0.0.1'];
+            }
+        };
+
+        $this->expectException(DownloadException::class);
+        $policy->prepareRequest('https://video.twimg.com/file.mp4', 'x');
+    }
 }

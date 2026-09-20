@@ -29,6 +29,8 @@ class FoundationTest extends TestCase
             ->assertDontSee('data-linkedin-extractor-beta', false)
             ->assertSee('YouTube Shorts')
             ->assertSee('LinkedIn')
+            ->assertSee('Pinterest')
+            ->assertSee('Planned')
             ->assertSee('Available')
             ->assertDontSee('LinkedIn Beta')
             ->assertSee('data-recent-section', false)

@@ -239,6 +239,11 @@
                         <div><h3>Facebook</h3><p>Recognition only</p></div>
                         <span class="status-badge">Planned</span>
                     </article>
+                    <article class="platform-card">
+                        <span class="platform-icon-slot" data-platform-icon="pinterest" aria-hidden="true">P</span>
+                        <div><h3>Pinterest</h3><p>Recognition only</p></div>
+                        <span class="status-badge">Planned</span>
+                    </article>
                     <article class="platform-card is-primary" data-linkedin-extractor-available>
                         <span class="platform-icon-slot" data-platform-icon="linkedin" aria-hidden="true">in</span>
                         <div><h3>LinkedIn</h3><p>Public posts and native video</p></div>
