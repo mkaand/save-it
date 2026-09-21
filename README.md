@@ -1,6 +1,9 @@
 # Save It
 
-Save It is a privacy-conscious media URL analysis experience built with Laravel 12 and PHP 8.2. The public application runs at `https://save.allmy.win`.
+Save It is a privacy-conscious media URL analysis experience built with Laravel 12 and PHP 8.2.
+
+See the portable [installation guide](docs/installation.md), [upgrade and rollback
+guide](docs/upgrade-and-rollback.md), and [provider regression matrix](docs/provider-regression-matrix.md).
 
 PR #9 adds production LinkedIn public-media parsing, short-lived signed download
 references, Range-aware proxy streaming, queue-backed YouTube merge and audio
@@ -17,7 +20,7 @@ of scope.
 - Real metadata analysis for public YouTube videos and Shorts
 - Validated YouTube thumbnails, ordered MP4/WebM video formats, and M4A/WebM audio formats
 - Five browser-local Recent Fetches stored in `localStorage`
-- Stateless JSON health endpoint
+- Stateless JSON liveness endpoint and dependency-aware readiness endpoint
 - Docker services for PHP-FPM, Nginx, Redis, the queue worker, and scheduler
 - Internal Python 3.12 extractor service with FastAPI, Pydantic, and versioned API v1
 - Exact-host provider registry with X, Instagram, YouTube, and LinkedIn adapters and controlled stubs for other providers
@@ -363,11 +366,11 @@ Do not run `docker compose down` for a routine deployment. After deployment, val
 
 ```bash
 ./scripts/validate-assets.sh http://127.0.0.1:8099
-./scripts/validate-assets.sh https://save.allmy.win
+./scripts/validate-assets.sh https://your-public-host.example
 ./scripts/validate-production-runtime.sh \
-  /opt/media-downloader \
+  /srv/save-it \
   http://127.0.0.1:8099 \
-  https://save.allmy.win
+  https://your-public-host.example
 ```
 
 The production validator requires five consecutive successful local and public
@@ -376,7 +379,8 @@ matching manifests, and persistent mount sources outside `/tmp`. Test app images
 against empty storage/database mounts with
 `./scripts/validate-runtime-init.sh media-downloader-app:local`.
 
-Rollback checkouts and runtime mounts must use a persistent `/opt/...` directory.
+Rollback checkouts and runtime mounts must use an operator-managed persistent
+directory.
 Never leave app, worker, or scheduler attached to a source below `/tmp`. See the
 [deployment and rollback runbook](docs/deployment-runbook.md) for the backup,
 checksum, runtime initialization, controlled recreation, and acceptance process.
@@ -413,13 +417,14 @@ curl --fail http://127.0.0.1:8099/
 curl --fail http://127.0.0.1:8099/health
 ```
 
-The health response is stateless and contains only:
+The liveness response is stateless and contains only:
 
 ```json
 {"status":"ok","application":"Save It"}
 ```
 
-Cloudflare and Hestia configuration are managed outside this repository.
+Reverse proxy, TLS, and network configuration are operator choices and are not
+required by the application or Docker Compose deployment.
 
 ## Continuous integration
 
