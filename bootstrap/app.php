@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\HealthController;
+use App\Http\Controllers\ReadinessController;
 use App\Http\Middleware\EnsureAdmin;
 use App\Http\Middleware\RedisRateLimit;
 use App\Http\Middleware\RejectMalformedToken;
@@ -19,6 +20,7 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
         then: function (): void {
             Route::middleware('api')->get('/health', HealthController::class)->name('health');
+            Route::middleware('api')->get('/ready', ReadinessController::class)->name('readiness');
         },
     )
     ->withMiddleware(function (Middleware $middleware): void {

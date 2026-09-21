@@ -6,15 +6,14 @@ Production deployments must use a clean, merged `main` checkout. Do not deploy a
 feature branch, run `docker compose down`, recreate Redis, delete volumes, or run a
 global Docker cleanup.
 
-Before changing a container:
+Before changing a container, operators should:
 
 1. record the current Git commit, container IDs, image IDs, health, restart counts,
    OOM state, mount sources, SQLite checksum, and `.env` checksum;
-2. create a timestamped backup outside the repository;
-3. verify the backup checksum manifest;
-4. confirm that every long-lived bind mount source is under a persistent path such
-   as `/opt`, never `/tmp`;
-5. prepare a rollback image or a reproducible checkout of the previous commit.
+2. confirm that every long-lived bind mount source is under an operator-managed
+   persistent path, never `/tmp`;
+3. prepare a rollback image or a reproducible checkout of the previous commit;
+4. follow their own backup and retention policy before any operation that needs it.
 
 ## Laravel runtime directories
 
@@ -59,13 +58,14 @@ Wait for health or running state after each command. Confirm that the Redis
 container ID did not change.
 
 Run the production validator from the same persistent project or rollback runtime
-directory used by Compose:
+directory used by Compose, supplying the operator's own project path and public
+host:
 
 ```bash
 ./scripts/validate-production-runtime.sh \
-  /opt/media-downloader \
+  /srv/save-it \
   http://127.0.0.1:8099 \
-  https://save.allmy.win
+  https://your-public-host.example
 ```
 
 The validator requires five consecutive local and public landing-page successes,
@@ -80,7 +80,7 @@ Rollback checkouts and their bind-mounted `storage` and `database` directories m
 remain under an explicit persistent path, for example:
 
 ```text
-/opt/save-it-runtime-rollback-<release>-<timestamp>
+/srv/save-it-runtime-rollback-<release>-<timestamp>
 ```
 
 Never start a long-lived container from a checkout below `/tmp`. Copy SQLite and
