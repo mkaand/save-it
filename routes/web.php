@@ -1,9 +1,12 @@
 <?php
 
+use App\Http\Controllers\Admin\AnalyticsController;
 use App\Http\Controllers\Admin\AuthController;
 use App\Http\Controllers\Admin\HomeController;
+use App\Http\Controllers\Admin\OperationsController;
 use App\Http\Controllers\Admin\PasswordController;
 use App\Http\Controllers\Admin\ProfileController;
+use App\Http\Controllers\Admin\ReportsController;
 use App\Http\Controllers\Admin\SettingsController;
 use Illuminate\Support\Facades\Route;
 
@@ -21,6 +24,12 @@ Route::prefix('admin')->name('admin.')->group(function (): void {
 
     Route::middleware(['admin', 'auth.session'])->group(function (): void {
         Route::get('/', HomeController::class)->name('home');
+        Route::get('/analytics', AnalyticsController::class)->name('analytics');
+        Route::get('/operations', [OperationsController::class, 'index'])->name('operations');
+        Route::post('/operations/cleanup', [OperationsController::class, 'cleanup'])->name('operations.cleanup');
+        Route::get('/reports', [ReportsController::class, 'index'])->name('reports');
+        Route::put('/reports', [ReportsController::class, 'update'])->name('reports.update');
+        Route::post('/reports/send', [ReportsController::class, 'send'])->name('reports.send');
         Route::get('/profile', [ProfileController::class, 'edit'])->name('profile');
         Route::put('/profile', [ProfileController::class, 'update'])->name('profile.update');
         Route::put('/profile/password', [ProfileController::class, 'password'])->name('profile.password');
@@ -33,6 +42,8 @@ Route::prefix('admin')->name('admin.')->group(function (): void {
         Route::put('/settings/security', [SettingsController::class, 'updateSecurity'])->name('security.update');
         Route::delete('/settings/security/rate-limits', [SettingsController::class, 'resetLimits'])->name('security.reset-limits');
         Route::post('/settings/security/turnstile/test', [SettingsController::class, 'testTurnstile'])->name('security.test-turnstile');
+        Route::get('/settings/geoip', [SettingsController::class, 'geoip'])->name('geoip');
+        Route::put('/settings/geoip', [SettingsController::class, 'updateGeoip'])->name('geoip.update');
         Route::post('/logout', [AuthController::class, 'destroy'])->name('logout');
     });
 });
