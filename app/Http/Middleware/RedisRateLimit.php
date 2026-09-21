@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Services\Analytics\UsageMetrics;
 use Closure;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -20,6 +21,7 @@ final class RedisRateLimit
         try {
             if (RateLimiter::tooManyAttempts($key, $limit)) {
                 $retryAfter = max(1, RateLimiter::availableIn($key));
+                app(UsageMetrics::class)->record($request, 'rate_limit_hit', false, 'unknown', 'rate_limited');
 
                 return $this->limited($retryAfter);
             }

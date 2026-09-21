@@ -1,0 +1,1 @@
+@if($items->count())<div class="chart">@php($maximum=max(1,$items->max()))@foreach($items->take(8) as $label=>$count)<div class="bar-row"><span class="muted">{{ $label ?: 'unknown' }}</span><span class="bar" style="width:{{ max(2,round($count*100/$maximum)) }}%"></span><strong>{{ $count }}</strong></div>@endforeach</div>@else<p class="muted">No data yet.</p>@endif

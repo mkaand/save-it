@@ -185,7 +185,7 @@ final class RecentPreviewStore
         return $target;
     }
 
-    private function cleanupExpired(): void
+    public function cleanupExpired(): void
     {
         $cutoff = time() - self::TTL_SECONDS;
         $files = glob($this->directory().DIRECTORY_SEPARATOR.'*') ?: [];

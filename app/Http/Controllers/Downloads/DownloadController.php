@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Downloads;
 
 use App\Http\Controllers\Controller;
+use App\Services\Analytics\UsageMetrics;
 use App\Services\Downloads\DownloadAssetStore;
 use App\Services\Downloads\DownloadException;
 use App\Services\Downloads\MediaStreamService;
@@ -20,9 +21,11 @@ final class DownloadController extends Controller
         DownloadAssetStore $store,
         MediaStreamService $streamer,
         YouTubeSourceResolver $youtube,
+        UsageMetrics $metrics,
     ): StreamedResponse|BinaryFileResponse|JsonResponse {
         try {
             $asset = $store->resolve($token);
+            $provider = is_string($asset['provider'] ?? null) ? $asset['provider'] : 'unknown';
             if (($asset['mode'] ?? null) === 'local_file') {
                 $path = $asset['path'] ?? null;
                 $root = realpath(storage_path('app/private/downloads'));
@@ -39,6 +42,8 @@ final class DownloadController extends Controller
                         'This prepared download is no longer available.',
                     );
                 }
+
+                $metrics->record($request, 'download', true, $provider);
 
                 return response()
                     ->download(
@@ -64,8 +69,12 @@ final class DownloadController extends Controller
                 );
             }
 
+            $metrics->record($request, 'download', true, $provider);
+
             return $streamer->stream($asset, $request->header('Range'));
         } catch (DownloadException $exception) {
+            $metrics->record($request, 'download', false, 'unknown', $exception->publicCode);
+
             return response()->json([
                 'error' => [
                     'code' => $exception->publicCode,

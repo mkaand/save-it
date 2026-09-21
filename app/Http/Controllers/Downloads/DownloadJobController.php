@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Downloads;
 
 use App\Http\Controllers\Controller;
 use App\Jobs\PrepareDownloadJob;
+use App\Services\Analytics\UsageMetrics;
 use App\Services\Downloads\DownloadAssetStore;
 use App\Services\Downloads\DownloadException;
 use App\Services\Downloads\DownloadJobStore;
@@ -16,6 +17,7 @@ final class DownloadJobController extends Controller
         Request $request,
         DownloadAssetStore $tokens,
         DownloadJobStore $jobs,
+        UsageMetrics $metrics,
     ): JsonResponse {
         $validated = $request->validate([
             'token' => ['required', 'string', 'max:160'],
@@ -32,6 +34,7 @@ final class DownloadJobController extends Controller
             }
             $jobId = $jobs->create(['mode' => $plan['mode']]);
             PrepareDownloadJob::dispatch($jobId, $plan);
+            $metrics->record($request, 'job_create', true);
 
             return response()->json([
                 'data' => [
@@ -43,6 +46,8 @@ final class DownloadJobController extends Controller
                 ],
             ], 202);
         } catch (DownloadException $exception) {
+            $metrics->record($request, 'job_create', false, 'unknown', $exception->publicCode);
+
             return $this->error($exception);
         }
     }

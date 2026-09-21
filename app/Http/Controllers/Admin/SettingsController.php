@@ -127,4 +127,27 @@ final class SettingsController extends Controller
             return back()->withErrors(['turnstile' => 'Turnstile configuration could not be tested.']);
         }
     }
+
+    public function geoip(ApplicationSettings $settings): View
+    {
+        return view('admin.geoip', ['geoip' => [
+            'mode' => $settings->get('geoip.mode', 'none'),
+            'header' => $settings->get('geoip.header', ''),
+            'maxmind_path' => $settings->get('geoip.maxmind_path', ''),
+        ]]);
+    }
+
+    public function updateGeoip(Request $request, ApplicationSettings $settings): RedirectResponse
+    {
+        $data = $request->validate([
+            'mode' => ['required', 'in:none,trusted_header,maxmind'],
+            'header' => ['nullable', 'regex:/^[A-Za-z0-9-]{1,100}$/'],
+            'maxmind_path' => ['nullable', 'string', 'max:1024'],
+        ]);
+        $settings->put('geoip.mode', $data['mode']);
+        $settings->put('geoip.header', $data['header'] ?? '');
+        $settings->put('geoip.maxmind_path', $data['maxmind_path'] ?? '');
+
+        return back()->with('status', 'GeoIP settings updated.');
+    }
 }
