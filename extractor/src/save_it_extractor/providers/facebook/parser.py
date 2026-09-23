@@ -146,15 +146,15 @@ def _variants(video: dict[str, Any]) -> list[dict[str, Any]]:
     raw: list[dict[str, Any]] = []
     legacy = video.get("videoDeliveryLegacyFields")
     if isinstance(legacy, dict):
-        for key, rank in (
-            ("browser_native_hd_url", 2),
-            ("playable_url_quality_hd", 2),
-            ("browser_native_sd_url", 1),
-            ("playable_url", 1),
+        for key, rank, native_quality in (
+            ("browser_native_hd_url", 2, "HD"),
+            ("playable_url_quality_hd", 2, "HD"),
+            ("browser_native_sd_url", 1, "SD"),
+            ("playable_url", 1, "SD"),
         ):
             url = legacy.get(key)
             if isinstance(url, str) and is_allowed_asset_url(url):
-                raw.append(_candidate(url, video, rank))
+                raw.append(_candidate(url, video, rank, native_quality))
     response = video.get("videoDeliveryResponseFragment")
     result = response.get("videoDeliveryResponseResult") if isinstance(response, dict) else None
     progressive = result.get("progressive_urls") if isinstance(result, dict) else None
@@ -165,7 +165,7 @@ def _variants(video: dict[str, Any]) -> list[dict[str, Any]]:
             url = item["progressive_url"]
             if is_allowed_asset_url(url):
                 metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
-                raw.append(_candidate(url, {**video, **metadata}, 0))
+                raw.append(_candidate(url, {**video, **metadata}, 0, None))
     deduplicated: dict[str, dict[str, Any]] = {}
     for item in raw:
         identity = _media_identity(item["url"])
@@ -175,7 +175,9 @@ def _variants(video: dict[str, Any]) -> list[dict[str, Any]]:
     return sorted(deduplicated.values(), key=_rank)[: settings.facebook_max_variants]
 
 
-def _candidate(url: str, metadata: dict[str, Any], quality_rank: int) -> dict[str, Any]:
+def _candidate(
+    url: str, metadata: dict[str, Any], quality_rank: int, native_quality: str | None
+) -> dict[str, Any]:
     width = _positive(metadata.get("width"))
     height = _positive(metadata.get("height"))
     bitrate = _positive(metadata.get("bitrate"))
@@ -185,7 +187,7 @@ def _candidate(url: str, metadata: dict[str, Any], quality_rank: int) -> dict[st
         "height": height,
         "bitrate": bitrate,
         "quality_rank": quality_rank,
-        "quality_label": _quality_label(width, height, bitrate),
+        "quality_label": _quality_label(width, height, bitrate, native_quality),
     }
 
 
@@ -235,10 +237,14 @@ def _text(value: Any, limit: int = 500) -> str | None:
     return " ".join(value.split())[:limit] or None if isinstance(value, str) else None
 
 
-def _quality_label(width: int | None, height: int | None, bitrate: int | None) -> str:
+def _quality_label(
+    width: int | None, height: int | None, bitrate: int | None, native_quality: str | None
+) -> str:
     dimensions = f"{width}×{height}" if width and height else None
     bitrate_label = f"{bitrate / 1_000_000:.1f} Mbps" if bitrate else None
-    return " · ".join(value for value in (dimensions, bitrate_label) if value) or "MP4"
+    return (
+        " · ".join(value for value in (native_quality, dimensions, bitrate_label) if value) or "MP4"
+    )
 
 
 def _changed() -> ProviderError:
