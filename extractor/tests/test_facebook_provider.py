@@ -91,7 +91,7 @@ def test_relay_parser_extracts_identity_bound_cobalt_native_fields() -> None:
     assert metadata["thumbnail_url"] == POSTER
     assert assets[0]["url"] == HD
     assert len(assets[0]["variants"]) == 2
-    assert assets[0]["variants"][0]["quality_label"] == "1920×1080"
+    assert assets[0]["variants"][0]["quality_label"] == "HD · 1920×1080"
 
 
 def test_reel_parser_uses_known_playback_video_path() -> None:
