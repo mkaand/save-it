@@ -40,7 +40,8 @@ Platform labels describe the current implementation:
 - YouTube and YouTube Shorts: direct formats, MP4 merge, M4A, MP3, and thumbnails available
 - LinkedIn: public post analysis and progressive public-media delivery available
 - Pinterest: anonymous public Pin image/video extraction and secure delivery available in Beta
-- TikTok and Facebook: URL recognition; extraction is planned
+- TikTok: anonymous public video extraction and secure delivery available in Beta; photo posts are not supported
+- Facebook: URL recognition; extraction is planned
 
 ## Analyze endpoint
 
@@ -59,9 +60,9 @@ The endpoint delegates authoritative provider recognition to the internal extrac
 - uses exact hostname matching to prevent suffix attacks;
 - rejects embedded credentials, custom ports, localhost, and IP address URLs;
 - does not fetch arbitrary submitted URLs or store server-side analysis history;
-- permits X, Instagram, Pinterest, and LinkedIn adapters to fetch canonical, service-constructed metadata URLs;
+- permits X, Instagram, Pinterest, TikTok, and LinkedIn adapters to fetch canonical, service-constructed metadata URLs;
 - submits only strictly canonical YouTube video URLs to the pinned yt-dlp library API;
-- returns real X, Instagram, Pinterest, YouTube, and LinkedIn metadata, short-lived Save It delivery references, or normalized previews for stubs;
+- returns real X, Instagram, Pinterest, TikTok, YouTube, and LinkedIn metadata, short-lived Save It delivery references, or normalized previews for stubs;
 - is limited to 30 requests per minute per client IP.
 
 Laravel calls `POST http://extractor:8000/v1/extract` with explicit connect and total
@@ -100,8 +101,11 @@ metadata from `cdn.syndication.twimg.com`, and emits allowlisted
 post and reel paths, fetches bounded public embed metadata from `www.instagram.com`,
 and emits allowlisted `*.cdninstagram.com` asset references. The LinkedIn
 adapter accepts only public post and activity URLs, reads bounded public structured
-HTML metadata, and emits only allowlisted `*.licdn.com` asset references. TikTok and
-Facebook remain `not_implemented` stubs. The YouTube adapter accepts only canonical
+HTML metadata, and emits only allowlisted `*.licdn.com` asset references. The TikTok
+adapter accepts canonical public video URLs and safely resolved `vm.tiktok.com` or
+`vt.tiktok.com` links, parses only the exact canonical hydration script, and emits
+only the observed direct MP4/poster hosts. TikTok photo posts remain unsupported.
+Facebook remains a `not_implemented` stub. The YouTube adapter accepts only canonical
 video and Shorts URLs and uses the pinned yt-dlp Python library API in metadata-only
 mode.
 
@@ -270,7 +274,7 @@ The following remain intentionally out of scope after PR #9:
 - queue-backed analysis jobs
 - server-side Recent Fetches persistence
 - cross-browser or cross-device history synchronization
-- TikTok or Facebook extraction logic
+- TikTok photo/carousel or Facebook extraction logic
 - authenticated, private, or authwall-protected LinkedIn analysis
 - Instagram Stories, Live, private, or login-required extraction
 - X private/protected posts or authenticated extraction

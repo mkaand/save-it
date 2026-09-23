@@ -157,6 +157,33 @@ final class ExtractorClient
                 );
             }
 
+            if (
+                $provider === MediaPlatform::TikTok->value
+                && is_string($code)
+                && in_array($code, [
+                    'rate_limited_upstream',
+                    'provider_timeout',
+                    'provider_response_changed',
+                    'provider_response_too_large',
+                    'upstream_unavailable',
+                    'disallowed_redirect',
+                    'too_many_redirects',
+                ], true)
+            ) {
+                throw new ExtractorException(
+                    $code,
+                    $response->status() === 502 ? 502 : 503,
+                    $requestId,
+                    match ($code) {
+                        'rate_limited_upstream' => 'TikTok is temporarily rate limiting public metadata requests.',
+                        'provider_timeout' => 'TikTok did not respond before the analysis deadline.',
+                        'provider_response_changed' => 'TikTok temporarily returned an unsupported metadata format. Please try again later.',
+                        'provider_response_too_large' => 'TikTok returned more metadata than the service accepts.',
+                        default => 'TikTok metadata is temporarily unavailable.',
+                    },
+                );
+            }
+
             throw new ExtractorException(
                 'upstream_unavailable',
                 503,
@@ -193,6 +220,7 @@ final class ExtractorClient
                 MediaPlatform::YouTubeShorts,
                 MediaPlatform::LinkedIn,
                 MediaPlatform::Pinterest,
+                MediaPlatform::TikTok,
             ], true)
             || ($data['provider_label'] ?? null) !== $expectedLabel
             || ! $this->validReadyVariant($platform, $variant)
@@ -254,7 +282,8 @@ final class ExtractorClient
         if (
             ($platform === MediaPlatform::LinkedIn && $maturity !== 'stable')
             || ($platform === MediaPlatform::Pinterest && $maturity !== 'beta')
-            || (! in_array($platform, [MediaPlatform::LinkedIn, MediaPlatform::Pinterest], true) && $maturity !== null)
+            || ($platform === MediaPlatform::TikTok && $maturity !== 'beta')
+            || (! in_array($platform, [MediaPlatform::LinkedIn, MediaPlatform::Pinterest, MediaPlatform::TikTok], true) && $maturity !== null)
             || ! is_array($warnings)
             || count($warnings) > 5
         ) {
@@ -693,6 +722,7 @@ final class ExtractorClient
             MediaPlatform::YouTubeShorts => $variant === 'shorts',
             MediaPlatform::LinkedIn => in_array($variant, ['post', 'activity', 'ugc_post'], true),
             MediaPlatform::Pinterest => $variant === 'pin',
+            MediaPlatform::TikTok => $variant === 'video',
             default => false,
         };
     }
@@ -707,6 +737,7 @@ final class ExtractorClient
             MediaPlatform::Instagram => $this->isSafeInstagramUrl($url, $variant),
             MediaPlatform::LinkedIn => $this->isSafeLinkedInUrl($url, $variant),
             MediaPlatform::Pinterest => $this->isSafePinterestUrl($url, $variant),
+            MediaPlatform::TikTok => $this->isSafeTikTokUrl($url, $variant),
             MediaPlatform::YouTube, MediaPlatform::YouTubeShorts => $this->isSafeYouTubeUrl(
                 $url,
                 $platform,
@@ -752,6 +783,23 @@ final class ExtractorClient
             && preg_match('#^/pin/[0-9]{10,30}/$#', (string) ($parts['path'] ?? '')) === 1;
     }
 
+    private function isSafeTikTokUrl(string $url, mixed $variant): bool
+    {
+        $parts = parse_url($url);
+
+        return $variant === 'video'
+            && filter_var($url, FILTER_VALIDATE_URL) !== false
+            && is_array($parts)
+            && ($parts['scheme'] ?? null) === 'https'
+            && ($parts['host'] ?? null) === 'www.tiktok.com'
+            && ! isset($parts['query'])
+            && ! isset($parts['fragment'])
+            && ! isset($parts['user'])
+            && ! isset($parts['pass'])
+            && ! isset($parts['port'])
+            && preg_match('#^/@[A-Za-z0-9_.]{1,64}/video/[0-9]{10,30}$#', (string) ($parts['path'] ?? '')) === 1;
+    }
+
     private function safeAssetUrl(
         mixed $url,
         MediaPlatform $platform,
@@ -778,7 +826,9 @@ final class ExtractorClient
                             ? ($host !== 'licdn.com' && str_ends_with($host, '.licdn.com'))
                             : ($platform === MediaPlatform::Pinterest
                                 ? in_array($host, ['i.pinimg.com', 'v1.pinimg.com'], true)
-                                : in_array($host, ['i.ytimg.com', 'img.youtube.com'], true))
+                                : ($platform === MediaPlatform::TikTok
+                                    ? in_array($host, ['v16-webapp-prime.tiktok.com', 'v19-webapp-prime.tiktok.com', 'p16-common-sign.tiktokcdn-eu.com'], true)
+                                    : in_array($host, ['i.ytimg.com', 'img.youtube.com'], true)))
                     )
             );
         if (
@@ -895,6 +945,10 @@ final class ExtractorClient
             return $variant === 'pin' ? MediaPlatform::Pinterest : null;
         }
 
+        if ($provider === MediaPlatform::TikTok->value) {
+            return $variant === 'video' ? MediaPlatform::TikTok : null;
+        }
+
         return $variant === null ? MediaPlatform::tryFrom($provider) : null;
     }
 
@@ -924,12 +978,14 @@ final class ExtractorClient
             'invalid_youtube_video_url' => 'Enter a valid YouTube video or Shorts URL.',
             'invalid_linkedin_post_url' => 'LinkedIn supports public post URLs only.',
             'invalid_pinterest_pin_url', 'unsupported_url' => 'Pinterest supports public Pin URLs only.',
+            'invalid_tiktok_video_url' => 'TikTok supports public video URLs only.',
             'linkedin_short_url_not_supported' => 'LinkedIn short links are not supported. Use the full public post URL.',
             'playlist_not_supported' => 'YouTube playlists are not supported. Submit a single video URL.',
             'live_not_supported' => 'YouTube live and scheduled live videos are not supported.',
             'authentication_required' => match ($provider) {
                 MediaPlatform::LinkedIn->value => 'This LinkedIn post requires signing in and cannot be analyzed anonymously.',
                 MediaPlatform::Pinterest->value => 'This Pinterest Pin requires authentication and cannot be analyzed anonymously.',
+                MediaPlatform::TikTok->value => 'This TikTok post requires authentication and cannot be analyzed anonymously.',
                 default => 'This video is private or requires authentication.',
             },
             'age_restricted' => 'Age-restricted YouTube videos are not supported.',
@@ -940,6 +996,7 @@ final class ExtractorClient
                 MediaPlatform::YouTube->value => 'This YouTube video does not expose supported media formats.',
                 MediaPlatform::LinkedIn->value => 'No downloadable media metadata was found in this public LinkedIn post.',
                 MediaPlatform::Pinterest->value => 'This public Pinterest Pin does not contain extractable media.',
+                MediaPlatform::TikTok->value => 'This public TikTok post does not contain extractable video.',
                 default => 'This public X post does not contain directly attached media.',
             },
             'post_unavailable' => 'This post is unavailable, private, or requires authentication.',

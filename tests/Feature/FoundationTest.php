@@ -29,6 +29,8 @@ class FoundationTest extends TestCase
             ->assertDontSee('data-linkedin-extractor-beta', false)
             ->assertSee('YouTube Shorts')
             ->assertSee('LinkedIn')
+            ->assertSee('TikTok')
+            ->assertSee('Public video media')
             ->assertSee('Pinterest')
             ->assertSee('Public Pin media')
             ->assertSee('Beta')
@@ -39,6 +41,7 @@ class FoundationTest extends TestCase
             ->assertSee('data-youtube-extractor-available', false)
             ->assertSee('data-youtube-shorts-extractor-available', false)
             ->assertSee('data-instagram-extractor-available', false)
+            ->assertSee('data-tiktok-extractor-beta', false)
             ->assertSee('<details class="privacy-details">', false)
             ->assertDontSee('Login')
             ->assertDontSee('Register');
