@@ -19,6 +19,7 @@ class UpstreamUrlPolicyTest extends TestCase
             'bare suffix' => ['https://licdn.com/file.mp4', 'linkedin'],
             'wrong provider' => ['https://dms.licdn.com/file.mp4', 'instagram'],
             'Pinterest suffix attack' => ['https://i.pinimg.com.evil.example/file.jpg', 'pinterest'],
+            'TikTok suffix attack' => ['https://v16-webapp-prime.tiktok.com.evil.example/file.mp4', 'tiktok'],
         ];
     }
 
@@ -49,6 +50,10 @@ class UpstreamUrlPolicyTest extends TestCase
         $this->assertSame(
             'https://i.pinimg.com/originals/file.jpg',
             $policy->validate('https://i.pinimg.com/originals/file.jpg', 'pinterest', false),
+        );
+        $this->assertSame(
+            'https://v16-webapp-prime.tiktok.com/obj/file.mp4',
+            $policy->validate('https://v16-webapp-prime.tiktok.com/obj/file.mp4', 'tiktok', false),
         );
     }
 

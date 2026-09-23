@@ -76,7 +76,7 @@ def _image(images: list[dict]) -> dict | None:
         "type": "image",
         "role": "primary",
         "url": chosen["url"],
-        "thumbnail_url": chosen["url"],
+        "thumbnail_url": _preview_image(images)["url"],
         "mime_type": _image_mime(chosen["url"]),
         "width": chosen["width"],
         "height": chosen["height"],
@@ -145,7 +145,7 @@ def _video(raw: Any, images: list[dict]) -> dict | None:
         "type": "video",
         "role": "primary",
         "url": selected["url"],
-        "thumbnail_url": images[0]["url"] if images else None,
+        "thumbnail_url": _preview_image(images)["url"] if images else None,
         "mime_type": "video/mp4",
         "width": selected["width"],
         "height": selected["height"],
@@ -157,6 +157,21 @@ def _video(raw: Any, images: list[dict]) -> dict | None:
 
 def _positive(value: Any) -> int | None:
     return value if isinstance(value, int) and value > 0 else None
+
+
+def _preview_image(images: list[dict]) -> dict:
+    """Pick the largest structured rendition RecentPreviewStore can materialize.
+
+    The original Pin asset remains the download source. Pinterest's image map also
+    includes bounded renditions, so using one here avoids silently turning a
+    durable preview failure into an unavailable Recent Fetch.
+    """
+    bounded = [
+        image
+        for image in images
+        if image["width"] <= 1600 and image["height"] <= 1600
+    ]
+    return bounded[0] if bounded else images[0]
 
 
 def _text(value: Any, limit: int = 500) -> str | None:

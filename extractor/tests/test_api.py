@@ -18,10 +18,7 @@ client = TestClient(main.app, raise_server_exceptions=False)
 
 @pytest.mark.parametrize(
     ("url", "provider", "label", "variant"),
-    [
-        ("https://www.tiktok.com/@example/video/123", "tiktok", "TikTok", None),
-        ("https://www.facebook.com/example/videos/123", "facebook", "Facebook", None),
-    ],
+    [("https://www.facebook.com/example/videos/123", "facebook", "Facebook", None)],
 )
 def test_recognized_providers_return_controlled_stub_contract(
     url: str, provider: str, label: str, variant: str | None

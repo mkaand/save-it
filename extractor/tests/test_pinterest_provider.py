@@ -70,16 +70,32 @@ def test_image_parser_selects_structured_original_not_social_size() -> None:
     assert metadata["media_count"] == 1
     assert assets[0]["url"] == IMAGE_ORIGINAL
     assert (assets[0]["width"], assets[0]["height"]) == (2400, 1600)
+    assert assets[0]["thumbnail_url"] == IMAGE_LOW
+
+
+def test_portrait_original_remains_download_source_while_thumbnail_is_bounded() -> None:
+    source = payload()
+    source["images"] = {
+        "orig": {"url": IMAGE_ORIGINAL, "width": 1689, "height": 2535},
+        "736x": {"url": IMAGE_LOW, "width": 736, "height": 1104},
+    }
+    _, assets, _ = parse_pinterest_pin(source, "615233999110252228")
+    assert assets[0]["url"] == IMAGE_ORIGINAL
+    assert (assets[0]["width"], assets[0]["height"]) == (1689, 2535)
+    assert assets[0]["thumbnail_url"] == IMAGE_LOW
 
 
 def test_video_parser_selects_highest_direct_mp4_and_keeps_poster_out_of_assets() -> None:
     source = payload(video=True)
-    source["images"] = {"orig": {"url": POSTER, "width": 1080, "height": 1920}}
+    source["images"] = {
+        "orig": {"url": POSTER, "width": 1689, "height": 2535},
+        "736x": {"url": IMAGE_LOW, "width": 736, "height": 1104},
+    }
     _, assets, media_type = parse_pinterest_pin(source, "615233999110252228")
     assert media_type == "video"
     assert len(assets) == 1
     assert assets[0]["url"] == VIDEO_1080
-    assert assets[0]["thumbnail_url"] == POSTER
+    assert assets[0]["thumbnail_url"] == IMAGE_LOW
     assert [variant["url"] for variant in assets[0]["variants"]] == [VIDEO_1080, VIDEO_720]
 
 

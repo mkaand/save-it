@@ -58,6 +58,7 @@ final class MediaUrlAnalyzer
                 MediaPlatform::YouTubeShorts,
                 MediaPlatform::LinkedIn,
                 MediaPlatform::Pinterest,
+                MediaPlatform::TikTok,
             ], true)
         ) {
             return $this->providerResult($recognition);

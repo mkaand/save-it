@@ -88,10 +88,14 @@ def classify_url(raw_url: str, max_length: int = 2048) -> ProviderContext:
                 _normalize_youtube_url(hostname, parsed)
                 if provider is Provider.YOUTUBE
                 else (
-                    _normalize_linkedin_url(hostname, parsed)
-                    if provider is Provider.LINKEDIN
-                    else urlunsplit(
-                        (parsed.scheme.lower(), hostname, parsed.path or "/", parsed.query, "")
+                    _normalize_tiktok_url(hostname, parsed)
+                    if provider is Provider.TIKTOK
+                    else (
+                        _normalize_linkedin_url(hostname, parsed)
+                        if provider is Provider.LINKEDIN
+                        else urlunsplit(
+                            (parsed.scheme.lower(), hostname, parsed.path or "/", parsed.query, "")
+                        )
                     )
                 )
             )
@@ -104,6 +108,8 @@ def classify_url(raw_url: str, max_length: int = 2048) -> ProviderContext:
         variant = "shorts" if "/shorts/" in normalized else "video"
     elif provider is Provider.INSTAGRAM:
         variant = "reel" if normalized.startswith("https://www.instagram.com/reel/") else "post"
+    elif provider is Provider.TIKTOK:
+        variant = "short" if hostname in {"vm.tiktok.com", "vt.tiktok.com"} else "video"
     elif provider is Provider.LINKEDIN:
         if hostname == "lnkd.in":
             variant = "short"
@@ -140,6 +146,8 @@ LINKEDIN_URN_IN_SLUG = re.compile(
 LINKEDIN_SHORT_PATH = re.compile(r"^/(?:p/)?([A-Za-z0-9_-]{4,128})/?$")
 PINTEREST_PIN_PATH = re.compile(r"^/pin/([0-9]{10,30})(?:/[^/]*)?/?$", re.IGNORECASE)
 PINTEREST_SHORT_PATH = re.compile(r"^/[A-Za-z0-9_-]{4,64}/?$")
+TIKTOK_VIDEO_PATH = re.compile(r"^/@([A-Za-z0-9_.]{1,64})/video/([0-9]{10,30})/?$", re.IGNORECASE)
+TIKTOK_SHORT_PATH = re.compile(r"^/[A-Za-z0-9_-]{4,64}/?$")
 INVALID_PERCENT_ENCODING = re.compile(r"%(?![A-Fa-f0-9]{2})")
 
 
@@ -259,6 +267,23 @@ def _normalize_linkedin_url(hostname: str, parsed: SplitResult) -> str:
         "invalid_linkedin_post_url",
         "LinkedIn supports public post URLs only.",
     )
+
+
+def _normalize_tiktok_url(hostname: str, parsed: SplitResult) -> str:
+    if hostname in {"vm.tiktok.com", "vt.tiktok.com"}:
+        if TIKTOK_SHORT_PATH.fullmatch(parsed.path) is None:
+            raise UrlValidationError(
+                "invalid_tiktok_video_url", "TikTok supports public video URLs only."
+            )
+        return f"https://{hostname}{parsed.path.rstrip('/')}"
+
+    match = TIKTOK_VIDEO_PATH.fullmatch(parsed.path)
+    if match is None:
+        raise UrlValidationError(
+            "invalid_tiktok_video_url", "TikTok supports public video URLs only."
+        )
+    username, video_id = match.groups()
+    return f"https://www.tiktok.com/@{username}/video/{video_id}"
 
 
 def _normalize_pinterest_url(hostname: str, parsed: SplitResult) -> str:

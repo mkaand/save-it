@@ -231,10 +231,10 @@
                         <div><h3>Instagram</h3><p>Post &amp; reel metadata</p></div>
                         <span class="status-badge status-mvp">Available</span>
                     </article>
-                    <article class="platform-card">
+                    <article class="platform-card is-primary" data-tiktok-extractor-beta>
                         <span class="platform-icon-slot" data-platform-icon="tiktok" aria-hidden="true">TT</span>
-                        <div><h3>TikTok</h3><p>Recognition only</p></div>
-                        <span class="status-badge">Planned</span>
+                        <div><h3>TikTok</h3><p>Public video media</p></div>
+                        <span class="status-badge status-mvp">Beta</span>
                     </article>
                     <article class="platform-card is-primary" data-x-extractor-available>
                         <span class="platform-icon-slot" data-platform-icon="x" aria-hidden="true">X</span>
