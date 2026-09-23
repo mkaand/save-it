@@ -10,7 +10,10 @@ final class UpstreamFileDownloader
 {
     private const CHUNK_BYTES = 8 * 1024 * 1024;
 
-    public function __construct(private readonly UpstreamUrlPolicy $policy) {}
+    public function __construct(
+        private readonly UpstreamUrlPolicy $policy,
+        private readonly TikTokMediaRelay $tiktokRelay,
+    ) {}
 
     /** @param array<string, mixed> $asset */
     public function download(array $asset, string $destination, int $remainingLimit): int
@@ -37,7 +40,12 @@ final class UpstreamFileDownloader
                 if ($sizeHint !== null) {
                     $end = min($end, $sizeHint - 1);
                 }
-                $response = $this->request($url, $provider, "bytes={$written}-{$end}");
+                $response = $this->request(
+                    $asset,
+                    $url,
+                    $provider,
+                    "bytes={$written}-{$end}",
+                );
                 if (! in_array($response->status(), [200, 206], true)) {
                     $this->logYouTubeFailure($provider, $response, 'youtube_upstream_http_status');
                     throw new DownloadException(
@@ -92,8 +100,16 @@ final class UpstreamFileDownloader
         );
     }
 
-    private function request(string $url, string $provider, string $range): Response
-    {
+    private function request(
+        array $asset,
+        string $url,
+        string $provider,
+        string $range,
+    ): Response {
+        if ($provider === 'tiktok') {
+            return $this->tiktokRelay->request($asset, $range);
+        }
+
         $redirects = max(0, (int) config('services.downloads.max_redirects'));
         for ($attempt = 0; $attempt <= $redirects; $attempt++) {
             $url = $this->policy->validate($url, $provider);

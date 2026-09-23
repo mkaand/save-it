@@ -15,6 +15,7 @@ class UpstreamUrlPolicy
         'youtube' => ['.googlevideo.com', 'i.ytimg.com', 'img.youtube.com'],
         'pinterest' => ['i.pinimg.com', 'v1.pinimg.com'],
         'tiktok' => ['v16-webapp-prime.tiktok.com', 'v19-webapp-prime.tiktok.com', 'p16-common-sign.tiktokcdn-eu.com'],
+        'tiktok_session' => ['www.tiktok.com'],
     ];
 
     public function validate(string $url, string $provider, bool $resolveDns = true): string

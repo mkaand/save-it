@@ -12,6 +12,7 @@ from save_it_extractor.providers.tiktok.parser import parse_tiktok_video
 
 VIDEO = "https://v16-webapp-prime.tiktok.com/obj/example.mp4?token=redacted"
 COVER = "https://p16-common-sign.tiktokcdn-eu.com/obj/example-cover.jpeg?token=redacted"
+ORIGIN_COVER = "https://p16-common-sign.tiktokcdn-eu.com/obj/origin-cover.jpeg?token=redacted"
 
 
 def page(
@@ -30,15 +31,20 @@ def page(
                         "video": {
                             "playAddr": VIDEO,
                             "cover": COVER,
+                            "originCover": ORIGIN_COVER,
+                            "dynamicCover": "https://p16-common-sign.tiktokcdn-eu.com/obj/dynamic-cover.jpeg",
                             "width": 576,
                             "height": 1024,
                             "duration": 1234,
                             "bitrateInfo": bitrate_info
                             or [
                                 {
-                                    "PlayAddr": {"UrlList": [VIDEO]},
-                                    "width": 576,
-                                    "height": 1024,
+                                    "PlayAddr": {
+                                        "UrlList": [VIDEO],
+                                        "Width": 576,
+                                        "Height": 1024,
+                                        "DataSize": 2_953_029,
+                                    },
                                     "Bitrate": 1000,
                                 }
                             ],
@@ -88,7 +94,7 @@ def test_parser_uses_identity_checked_structured_video_and_not_social_metadata()
     assert media_type == "video"
     assert metadata["media_count"] == 1
     assert assets[0]["url"] == VIDEO
-    assert assets[0]["thumbnail_url"] == COVER
+    assert assets[0]["thumbnail_url"] == ORIGIN_COVER
     assert assets[0]["mime_type"] == "video/mp4"
 
 
@@ -96,16 +102,20 @@ def test_parser_deterministically_prefers_the_highest_structured_mp4_variant() -
     source = page(
         bitrate_info=[
             {
-                "PlayAddr": {"UrlList": ["https://v16-webapp-prime.tiktok.com/obj/low.mp4"]},
-                "width": 360,
-                "height": 640,
-                "Bitrate": 500,
+                "PlayAddr": {
+                    "UrlList": ["https://v16-webapp-prime.tiktok.com/obj/low.mp4"],
+                    "Width": 360,
+                    "Height": 640,
+                },
+                "Bitrate": 500_000,
             },
             {
-                "PlayAddr": {"UrlList": ["https://v19-webapp-prime.tiktok.com/obj/high.mp4"]},
-                "width": 720,
-                "height": 1280,
-                "Bitrate": 1500,
+                "PlayAddr": {
+                    "UrlList": ["https://v19-webapp-prime.tiktok.com/obj/high.mp4"],
+                    "Width": 720,
+                    "Height": 1280,
+                },
+                "Bitrate": 1_500_000,
             },
         ]
     )
@@ -113,6 +123,63 @@ def test_parser_deterministically_prefers_the_highest_structured_mp4_variant() -
     assert assets[0]["width"] == 720
     assert assets[0]["height"] == 1280
     assert len(assets[0]["variants"]) == 3
+    assert assets[0]["variants"][0]["quality_label"] == "720×1280 · 1.5 Mbps"
+
+
+def test_parser_collapses_equivalent_signed_urls_and_retains_meaningful_quality() -> None:
+    source = page(
+        bitrate_info=[
+            {
+                "PlayAddr": {
+                    "UrlList": [VIDEO + "&signature=first"],
+                    "Width": 576,
+                    "Height": 1024,
+                    "DataSize": 2_953_029,
+                },
+                "Bitrate": 2_240_963,
+            },
+            {
+                "PlayAddr": {
+                    "UrlList": [
+                        VIDEO.replace("v16-webapp-prime", "v19-webapp-prime") + "&signature=second"
+                    ],
+                    "Width": 576,
+                    "Height": 1024,
+                },
+                "Bitrate": 1_500_000,
+            },
+        ]
+    )
+    _, assets, _ = parse_tiktok_video(source, "6718335390845095173", "scout2015")
+    variants = assets[0]["variants"]
+    assert len(variants) == 1
+    assert variants[0]["quality_label"] == "576×1024 · 2.2 Mbps"
+    assert variants[0]["filesize"] == 2_953_029
+    assert variants[0]["is_preferred"] is True
+
+
+def test_parser_uses_bitrate_as_the_label_when_dimensions_are_missing() -> None:
+    source = page(
+        bitrate_info=[
+            {
+                "PlayAddr": {
+                    "UrlList": ["https://v19-webapp-prime.tiktok.com/obj/bitrate-only.mp4"]
+                },
+                "Bitrate": 1_250_000,
+            }
+        ]
+    )
+    _, assets, _ = parse_tiktok_video(source, "6718335390845095173", "scout2015")
+    assert "1.2 Mbps" in [variant["quality_label"] for variant in assets[0]["variants"]]
+
+
+def test_parser_prefers_static_origin_cover_and_never_uses_dynamic_cover() -> None:
+    _, assets, _ = parse_tiktok_video(page(), "6718335390845095173", "scout2015")
+    assert assets[0]["thumbnail_url"] == ORIGIN_COVER
+
+    without_origin = page().replace(f'"originCover": "{ORIGIN_COVER}", ', "")
+    _, assets, _ = parse_tiktok_video(without_origin, "6718335390845095173", "scout2015")
+    assert assets[0]["thumbnail_url"] == COVER
 
 
 def test_parser_rejects_unsafe_video_hosts_and_missing_video() -> None:

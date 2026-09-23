@@ -3,6 +3,7 @@
 import json
 from html.parser import HTMLParser
 from typing import Any
+from urllib.parse import urlsplit
 
 from save_it_extractor.providers.errors import ProviderError
 from save_it_extractor.providers.tiktok.network import is_allowed_asset_url
@@ -52,7 +53,9 @@ def parse_tiktok_video(
             422,
             {"provider": "tiktok"},
         )
-    cover = _first_allowed(video.get("cover"), video.get("originCover"), video.get("dynamicCover"))
+    # originCover is TikTok's static bounded rendition. The regular and dynamic
+    # covers can be oversized or animated and are unsuitable for durable previews.
+    cover = _first_allowed(video.get("originCover"), video.get("cover"))
     width = _positive(selected.get("width")) or _positive(video.get("width"))
     height = _positive(selected.get("height")) or _positive(video.get("height"))
     duration = _positive(video.get("duration"))
@@ -107,12 +110,16 @@ def _video_candidates(video: dict[str, Any]) -> tuple[dict | None, list[dict]]:
             else None
         )
         if url:
+            width = _positive(play.get("Width")) or _positive(value.get("width"))
+            height = _positive(play.get("Height")) or _positive(value.get("height"))
             raw.append(
                 {
                     "url": url,
-                    "width": _positive(value.get("width")),
-                    "height": _positive(value.get("height")),
+                    "identity": _media_identity(url),
+                    "width": width,
+                    "height": height,
                     "bitrate": _positive(value.get("Bitrate")) or _positive(value.get("bitrate")),
+                    "filesize": _positive(play.get("DataSize")),
                     "index": index,
                 }
             )
@@ -121,15 +128,22 @@ def _video_candidates(video: dict[str, Any]) -> tuple[dict | None, list[dict]]:
         raw.append(
             {
                 "url": direct,
+                "identity": _media_identity(direct),
                 "width": _positive(video.get("width")),
                 "height": _positive(video.get("height")),
                 "bitrate": _positive(video.get("bitrate")),
+                "filesize": None,
                 "index": len(raw),
             }
         )
-    raw.sort(
-        key=lambda v: ((v["width"] or 0) * (v["height"] or 0), v["bitrate"] or 0, v["url"]),
-        reverse=True,
+    deduplicated: dict[str, dict] = {}
+    for candidate in raw:
+        current = deduplicated.get(candidate["identity"])
+        if current is None or _candidate_rank(candidate) < _candidate_rank(current):
+            deduplicated[candidate["identity"]] = candidate
+    ordered = sorted(
+        deduplicated.values(),
+        key=_candidate_rank,
     )
     variants = [
         {
@@ -141,15 +155,31 @@ def _video_candidates(video: dict[str, Any]) -> tuple[dict | None, list[dict]]:
             "height": value["height"],
             "fps": None,
             "container": "mp4",
-            "quality_label": f"{value['width']}×{value['height']}"
-            if value["width"] and value["height"]
-            else "MP4",
-            "filesize": None,
+            "quality_label": _quality_label(value),
+            "filesize": value["filesize"],
             "is_preferred": index == 0,
         }
-        for index, value in enumerate(raw[:8])
+        for index, value in enumerate(ordered[:8])
     ]
-    return (raw[0] if raw else None), variants
+    return (ordered[0] if ordered else None), variants
+
+
+def _media_identity(url: str) -> str:
+    parts = urlsplit(url)
+    return parts.path
+
+
+def _candidate_rank(value: dict) -> tuple[int, int, str, int]:
+    area = (value["width"] or 0) * (value["height"] or 0)
+    return (-area, -(value["bitrate"] or 0), value["identity"], value["index"])
+
+
+def _quality_label(value: dict) -> str:
+    dimensions = (
+        f"{value['width']}×{value['height']}" if value["width"] and value["height"] else None
+    )
+    bitrate = f"{value['bitrate'] / 1_000_000:.1f} Mbps" if value["bitrate"] else None
+    return " · ".join(part for part in (dimensions, bitrate) if part) or "MP4"
 
 
 def _first_allowed(*values: Any) -> str | None:

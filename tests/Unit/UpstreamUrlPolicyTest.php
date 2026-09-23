@@ -55,6 +55,14 @@ class UpstreamUrlPolicyTest extends TestCase
             'https://v16-webapp-prime.tiktok.com/obj/file.mp4',
             $policy->validate('https://v16-webapp-prime.tiktok.com/obj/file.mp4', 'tiktok', false),
         );
+        $this->assertSame(
+            'https://www.tiktok.com/@creator/video/1234567890123456789',
+            $policy->validate(
+                'https://www.tiktok.com/@creator/video/1234567890123456789',
+                'tiktok_session',
+                false,
+            ),
+        );
     }
 
     public function test_it_rejects_private_dns_answers_before_fetching(): void

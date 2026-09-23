@@ -37,6 +37,7 @@ class Settings:
     tiktok_read_timeout_seconds: float = 8.0
     tiktok_max_redirects: int = 4
     tiktok_max_metadata_bytes: int = 4 * 1024 * 1024
+    tiktok_max_media_bytes: int = 512 * 1024 * 1024
     tiktok_max_variants: int = 8
     youtube_socket_timeout_seconds: float = 5.0
     youtube_max_source_formats: int = 500

@@ -78,6 +78,39 @@ class DownloadDeliveryTest extends TestCase
         Http::assertSentCount(1);
     }
 
+    public function test_tiktok_proxy_uses_the_internal_anonymous_media_relay_for_ranges(): void
+    {
+        $page = 'https://www.tiktok.com/@scout2015/video/6718335390845095173';
+        $media = 'https://v16-webapp-prime.tiktok.com/obj/example.mp4?token=sensitive';
+        Http::fake(function ($request) use ($page, $media) {
+            $this->assertSame('http://extractor:8000/v1/tiktok/media', $request->url());
+            $this->assertSame($page, $request->data()['source_page_url'] ?? null);
+            $this->assertSame($media, $request->data()['media_url'] ?? null);
+            $this->assertSame('bytes=0-0', $request->header('Range')[0] ?? null);
+
+            return Http::response('x', 206, [
+                'Content-Type' => 'video/mp4',
+                'Content-Length' => '1',
+                'Content-Range' => 'bytes 0-0/100',
+                'Accept-Ranges' => 'bytes',
+            ]);
+        });
+        $token = $this->app->make(DownloadAssetStore::class)->issue([
+            ...$this->asset(),
+            'provider' => 'tiktok',
+            'upstream_url' => $media,
+            'source_page_url' => $page,
+        ]);
+
+        $response = $this->withHeader('Range', 'bytes=0-0')->get("/api/downloads/{$token}");
+
+        $response->assertStatus(206)
+            ->assertHeader('Content-Type', 'video/mp4')
+            ->assertHeader('Content-Range', 'bytes 0-0/100');
+        $this->assertSame('x', $response->streamedContent());
+        Http::assertSentCount(1);
+    }
+
     public function test_unknown_size_range_skips_probe_and_uses_the_client_range_response(): void
     {
         Http::fake(function ($request) {

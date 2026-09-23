@@ -4,7 +4,9 @@ namespace Tests\Feature;
 
 use App\Services\Downloads\DownloadAssetStore;
 use App\Services\Downloads\ShareMediaPreparationStore;
+use App\Services\Downloads\UpstreamUrlPolicy;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class ShareMediaPreparationTest extends TestCase
@@ -97,6 +99,62 @@ class ShareMediaPreparationTest extends TestCase
         touch($orphan, time() - 700);
         $store->cleanupExpired();
         $this->assertFileDoesNotExist($orphan);
+    }
+
+    public function test_tiktok_proxy_share_preparation_uses_the_internal_media_relay(): void
+    {
+        if (! is_executable('/usr/bin/ffmpeg')) {
+            $this->markTestSkipped('FFmpeg integration coverage runs in the Docker validation image.');
+        }
+
+        $page = 'https://www.tiktok.com/@creator/video/1234567890123456789';
+        $media = 'https://v16-webapp-prime.tiktok.com/obj/example.mp4?token=sensitive';
+        $source = storage_path('app/private/downloads/tiktok-share-source-'.bin2hex(random_bytes(4)).'.mp4');
+        File::ensureDirectoryExists(dirname($source), 0700, true);
+        $this->createMp4Fixture($source);
+        $this->paths[] = $source;
+        $bytes = file_get_contents($source);
+        $this->assertIsString($bytes);
+        $size = strlen($bytes);
+        $this->app->bind(UpstreamUrlPolicy::class, fn () => new class extends UpstreamUrlPolicy
+        {
+            protected function resolveAddresses(string $host): array
+            {
+                return ['8.8.8.8'];
+            }
+        });
+        Http::fake(function ($request) use ($page, $media, $bytes, $size) {
+            $this->assertSame('http://extractor:8000/v1/tiktok/media', $request->url());
+            $this->assertSame($page, $request->data()['source_page_url'] ?? null);
+            $this->assertSame($media, $request->data()['media_url'] ?? null);
+            $this->assertSame('bytes=0-'.($size - 1), $request->header('Range')[0] ?? null);
+
+            return Http::response($bytes, 206, [
+                'Content-Type' => 'video/mp4',
+                'Content-Length' => (string) $size,
+                'Content-Range' => 'bytes 0-'.($size - 1)."/{$size}",
+                'Accept-Ranges' => 'bytes',
+            ]);
+        });
+        $token = $this->app->make(DownloadAssetStore::class)->issue([
+            'version' => 1,
+            'mode' => 'proxy',
+            'provider' => 'tiktok',
+            'source_page_url' => $page,
+            'upstream_url' => $media,
+            'filename' => 'TikTok.mp4',
+            'mime_type' => 'video/mp4',
+            'expected_size' => $size,
+        ]);
+
+        $response = $this->postJson('/api/share-preparations', ['token' => $token])
+            ->assertOk()
+            ->assertJsonPath('data.mime_type', 'video/mp4');
+        $prepared = $this->app->make(ShareMediaPreparationStore::class)
+            ->resolve(basename((string) $response->json('data.url')));
+        $this->assertNotNull($prepared);
+        $this->paths[] = $prepared['path'];
+        Http::assertSentCount(1);
     }
 
     public function test_remux_output_over_the_share_limit_is_rejected_without_caching_a_partial_file(): void

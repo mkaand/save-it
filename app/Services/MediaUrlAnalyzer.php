@@ -486,6 +486,7 @@ final class MediaUrlAnalyzer
                     'version' => 1,
                     'mode' => 'proxy',
                     'provider' => $recognition->platform->value,
+                    ...$this->providerRequestContext($recognition),
                     'asset_id' => $asset['id'],
                     'upstream_url' => $url,
                     'mime_type' => $mime,
@@ -530,6 +531,7 @@ final class MediaUrlAnalyzer
                     : ($asset['mime_type'] ?? null);
                 $sources[] = [
                     'provider' => $recognition->platform->value,
+                    ...$this->providerRequestContext($recognition),
                     'upstream_url' => $url,
                     'mime_type' => $mime,
                     'filename' => $this->downloadFilename($title, is_string($mime) ? $mime : null, $index + 1),
@@ -605,6 +607,7 @@ final class MediaUrlAnalyzer
                     'version' => 1,
                     'mode' => 'proxy',
                     'provider' => $recognition->platform->value,
+                    ...$this->providerRequestContext($recognition),
                     'asset_id' => $asset['id'].'-preview',
                     'upstream_url' => $previewSource,
                     'mime_type' => is_string($asset['thumbnail_url'] ?? null)
@@ -659,6 +662,7 @@ final class MediaUrlAnalyzer
 
         $durable = $this->durablePreviewReference([
             'provider' => $recognition->platform->value,
+            ...$this->providerRequestContext($recognition),
             'upstream_url' => $selection->source,
         ]);
         if ($durable !== null) {
@@ -676,6 +680,7 @@ final class MediaUrlAnalyzer
             'version' => 1,
             'mode' => 'proxy',
             'provider' => $recognition->platform->value,
+            ...$this->providerRequestContext($recognition),
             'asset_id' => 'primary-preview',
             'upstream_url' => $selection->source,
             'mime_type' => 'image/jpeg',
@@ -734,6 +739,14 @@ final class MediaUrlAnalyzer
             'download_url' => route('api.downloads.show', ['token' => $token], false),
             'expires_in' => (int) config('services.downloads.token_ttl_seconds'),
         ];
+    }
+
+    /** @return array<string, string> */
+    private function providerRequestContext(ExtractorRecognition $recognition): array
+    {
+        return $recognition->platform === MediaPlatform::TikTok
+            ? ['source_page_url' => $recognition->normalizedUrl]
+            : [];
     }
 
     private function downloadFilename(string $title, ?string $mime, int $index): string
