@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Services\Downloads\DownloadException;
+use App\Services\Downloads\TikTokMediaRelay;
 use App\Services\Downloads\UpstreamUrlPolicy;
 use App\Services\Previews\RecentPreviewStore;
 use Illuminate\Support\Facades\Http;
@@ -32,9 +33,10 @@ class RecentPreviewStoreTest extends TestCase
                 'Content-Length' => (string) strlen($this->png()),
             ]),
         ]);
-        $store = new RecentPreviewStore($this->policy($url));
+        $store = $this->store($this->policy($url));
         $identifier = $store->issue($this->asset($url));
-        $cached = (new RecentPreviewStore(Mockery::mock(UpstreamUrlPolicy::class)))->resolve($identifier);
+        $cachedPolicy = Mockery::mock(UpstreamUrlPolicy::class);
+        $cached = $this->store($cachedPolicy)->resolve($identifier);
 
         $this->assertNotNull($cached);
         $this->assertSame('image/png', $cached['mime_type']);
@@ -54,7 +56,7 @@ class RecentPreviewStoreTest extends TestCase
         Http::fake([$url => Http::response('not an image', 200, ['Content-Type' => 'text/plain'])]);
 
         $this->expectException(DownloadException::class);
-        (new RecentPreviewStore($this->policy($url)))->issue($this->asset($url));
+        $this->store($this->policy($url))->issue($this->asset($url));
     }
 
     public function test_declared_oversize_preview_is_rejected_before_streaming(): void
@@ -66,7 +68,43 @@ class RecentPreviewStoreTest extends TestCase
         ])]);
 
         $this->expectException(DownloadException::class);
-        (new RecentPreviewStore($this->policy($url)))->issue($this->asset($url));
+        $this->store($this->policy($url))->issue($this->asset($url));
+    }
+
+    public function test_tiktok_durable_poster_uses_the_internal_media_relay(): void
+    {
+        $page = 'https://www.tiktok.com/@creator/video/1234567890123456789';
+        $poster = 'https://p16-common-sign.tiktokcdn-eu.com/obj/poster.jpeg?token=sensitive';
+        Http::fake(function ($request) use ($page, $poster) {
+            $this->assertSame('http://extractor:8000/v1/tiktok/media', $request->url());
+            $this->assertSame($page, $request->data()['source_page_url'] ?? null);
+            $this->assertSame($poster, $request->data()['media_url'] ?? null);
+
+            return Http::response($this->png(), 200, [
+                'Content-Type' => 'image/png',
+                'Content-Length' => (string) strlen($this->png()),
+            ]);
+        });
+        $policy = new class extends UpstreamUrlPolicy
+        {
+            protected function resolveAddresses(string $host): array
+            {
+                return ['8.8.8.8'];
+            }
+        };
+        $store = $this->store($policy);
+
+        $identifier = $store->issue([
+            'provider' => 'tiktok',
+            'upstream_url' => $poster,
+            'source_page_url' => $page,
+        ]);
+        $cached = $store->resolve($identifier);
+
+        $this->assertNotNull($cached);
+        $this->assertSame('image/png', $cached['mime_type']);
+        $this->files[] = $cached['path'];
+        Http::assertSentCount(1);
     }
 
     public function test_expired_orphans_are_cleaned_oldest_first_in_bounded_passes(): void
@@ -90,7 +128,7 @@ class RecentPreviewStoreTest extends TestCase
             'Content-Type' => 'image/png',
             'Content-Length' => (string) strlen($this->png()),
         ])]);
-        $store = new RecentPreviewStore($this->permissivePolicy($url));
+        $store = $this->store($this->permissivePolicy($url));
         $first = $store->issue($this->asset($url));
         $this->files[] = $store->resolve($first)['path'];
 
@@ -109,6 +147,11 @@ class RecentPreviewStoreTest extends TestCase
         $policy->shouldReceive('validate')->once()->with($url, 'youtube')->andReturn($url);
 
         return $policy;
+    }
+
+    private function store(UpstreamUrlPolicy $policy): RecentPreviewStore
+    {
+        return new RecentPreviewStore($policy, new TikTokMediaRelay($policy));
     }
 
     private function permissivePolicy(string $url): UpstreamUrlPolicy

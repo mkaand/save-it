@@ -3,6 +3,7 @@
 namespace App\Services\Previews;
 
 use App\Services\Downloads\DownloadException;
+use App\Services\Downloads\TikTokMediaRelay;
 use App\Services\Downloads\UpstreamUrlPolicy;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Cache;
@@ -23,7 +24,10 @@ final class RecentPreviewStore
         'image/webp' => 'webp',
     ];
 
-    public function __construct(private readonly UpstreamUrlPolicy $policy) {}
+    public function __construct(
+        private readonly UpstreamUrlPolicy $policy,
+        private readonly TikTokMediaRelay $tiktokRelay,
+    ) {}
 
     /** @param array<string, mixed> $asset */
     public function issue(array $asset): string
@@ -31,7 +35,11 @@ final class RecentPreviewStore
         $identifier = Str::lower(Str::random(48));
         $provider = $this->requiredString($asset, 'provider');
         $url = $this->requiredString($asset, 'upstream_url');
-        $response = $this->request($url, $provider);
+        $response = $this->request(
+            $asset,
+            $url,
+            $provider,
+        );
         $file = null;
 
         try {
@@ -98,8 +106,15 @@ final class RecentPreviewStore
         return ['path' => $path, 'mime_type' => $record['mime_type']];
     }
 
-    private function request(string $url, string $provider): Response
-    {
+    private function request(
+        array $asset,
+        string $url,
+        string $provider,
+    ): Response {
+        if ($provider === 'tiktok') {
+            return $this->tiktokRelay->request($asset, null);
+        }
+
         $redirects = max(0, (int) config('services.downloads.max_redirects'));
         for ($attempt = 0; $attempt <= $redirects; $attempt++) {
             $url = $this->policy->validate($url, $provider);

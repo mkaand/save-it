@@ -39,6 +39,13 @@ class ResolveYouTubeRequest(BaseModel):
     )
 
 
+class TikTokMediaRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_page_url: str = Field(min_length=1, max_length=2048)
+    media_url: str = Field(min_length=1, max_length=4096)
+
+
 class ErrorBody(BaseModel):
     code: str
     message: str

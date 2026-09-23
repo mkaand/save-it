@@ -4,16 +4,17 @@ import time
 from contextlib import asynccontextmanager
 from uuid import uuid4
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Header, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from save_it_extractor.api.errors import ContractError, error_response
-from save_it_extractor.api.models import ExtractRequest, ResolveYouTubeRequest
+from save_it_extractor.api.models import ExtractRequest, ResolveYouTubeRequest, TikTokMediaRequest
 from save_it_extractor.config import settings
 from save_it_extractor.domain.urls import UrlValidationError, classify_url
 from save_it_extractor.logging import log_event
 from save_it_extractor.providers.errors import ProviderError
+from save_it_extractor.providers.tiktok.delivery import TikTokMediaDeliveryClient
 from save_it_extractor.providers.youtube.client import YouTubeMetadataClient
 from save_it_extractor.services.extractor import ExtractionService
 
@@ -35,6 +36,7 @@ app = FastAPI(
 )
 service = ExtractionService()
 youtube_client = YouTubeMetadataClient()
+tiktok_media_client = TikTokMediaDeliveryClient()
 
 
 @app.middleware("http")
@@ -238,6 +240,37 @@ async def extract(payload: ExtractRequest, request: Request) -> JSONResponse:
                 "warnings": result.warnings,
             },
         )
+    )
+
+
+@app.post("/v1/tiktok/media")
+async def tiktok_media(
+    payload: TikTokMediaRequest,
+    request: Request,
+    range_header: str | None = Header(default=None, alias="Range"),
+):
+    request.state.provider = "tiktok"
+    try:
+        relay = await tiktok_media_client.open(
+            payload.source_page_url,
+            payload.media_url,
+            range_header,
+        )
+    except ProviderError as exception:
+        return error_response(
+            ContractError(
+                exception.code,
+                exception.message,
+                exception.status_code,
+                request.state.request_id,
+                exception.details,
+            )
+        )
+
+    return StreamingResponse(
+        relay.body(),
+        status_code=relay.status_code,
+        headers=relay.headers,
     )
 
 

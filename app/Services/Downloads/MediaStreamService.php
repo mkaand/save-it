@@ -21,7 +21,10 @@ final class MediaStreamService
         'image/webp',
     ];
 
-    public function __construct(private readonly UpstreamUrlPolicy $policy) {}
+    public function __construct(
+        private readonly UpstreamUrlPolicy $policy,
+        private readonly TikTokMediaRelay $tiktokRelay,
+    ) {}
 
     /** @param array<string, mixed> $asset */
     public function stream(array $asset, ?string $range): StreamedResponse
@@ -33,7 +36,7 @@ final class MediaStreamService
         $expected = is_int($asset['expected_size'] ?? null) ? $asset['expected_size'] : null;
         $limit = max(1, (int) config('services.downloads.max_file_bytes'));
         if ($expected === null && $rangeHeader === null) {
-            $expected = $this->probeSize($url, $provider);
+            $expected = $this->probeSize($asset, $url, $provider);
         }
         if ($expected !== null && $expected > $limit) {
             throw new DownloadException(
@@ -42,7 +45,7 @@ final class MediaStreamService
                 'The media file exceeds the download size limit.',
             );
         }
-        $response = $this->request($url, $provider, $rangeHeader);
+        $response = $this->request($asset, $url, $provider, $rangeHeader);
 
         if ($response->status() === 416) {
             $contentRange = $response->header('Content-Range');
@@ -198,8 +201,16 @@ final class MediaStreamService
         }, $response->status(), $headers);
     }
 
-    private function request(string $url, string $provider, ?string $range): Response
-    {
+    private function request(
+        array $asset,
+        string $url,
+        string $provider,
+        ?string $range,
+    ): Response {
+        if ($provider === 'tiktok') {
+            return $this->tiktokRelay->request($asset, $range);
+        }
+
         $redirects = max(0, (int) config('services.downloads.max_redirects'));
         for ($attempt = 0; $attempt <= $redirects; $attempt++) {
             $url = $this->policy->validate($url, $provider);
@@ -261,9 +272,12 @@ final class MediaStreamService
         ]);
     }
 
-    private function probeSize(string $url, string $provider): ?int
-    {
-        $response = $this->request($url, $provider, 'bytes=0-0');
+    private function probeSize(
+        array $asset,
+        string $url,
+        string $provider,
+    ): ?int {
+        $response = $this->request($asset, $url, $provider, 'bytes=0-0');
         try {
             if (! in_array($response->status(), [200, 206], true)) {
                 return null;
