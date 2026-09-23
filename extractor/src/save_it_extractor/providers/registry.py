@@ -1,5 +1,6 @@
 from save_it_extractor.domain.models import Provider
 from save_it_extractor.providers.base import ProviderAdapter
+from save_it_extractor.providers.facebook import FacebookProviderAdapter
 from save_it_extractor.providers.instagram import InstagramProviderAdapter
 from save_it_extractor.providers.linkedin import LinkedInProviderAdapter
 from save_it_extractor.providers.pinterest import PinterestProviderAdapter
@@ -24,12 +25,16 @@ class ProviderRegistry:
                         LinkedInProviderAdapter()
                         if provider is Provider.LINKEDIN
                         else (
-                            TikTokProviderAdapter()
-                            if provider is Provider.TIKTOK
+                            FacebookProviderAdapter()
+                            if provider is Provider.FACEBOOK
                             else (
-                                PinterestProviderAdapter()
-                                if provider is Provider.PINTEREST
-                                else StubProviderAdapter(provider)
+                                TikTokProviderAdapter()
+                                if provider is Provider.TIKTOK
+                                else (
+                                    PinterestProviderAdapter()
+                                    if provider is Provider.PINTEREST
+                                    else StubProviderAdapter(provider)
+                                )
                             )
                         )
                     )

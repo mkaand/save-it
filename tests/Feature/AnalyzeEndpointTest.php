@@ -22,7 +22,7 @@ class AnalyzeEndpointTest extends TestCase
             'TikTok' => ['https://www.tiktok.com/@creator/video/123456', 'tiktok', 'TikTok', 'preview'],
             'X' => ['https://x.com/saveit/status/123456', 'x', 'X', 'preview'],
             'Twitter' => ['https://twitter.com/saveit/status/123456', 'x', 'X', 'preview'],
-            'Facebook' => ['https://www.facebook.com/watch/?v=123456', 'facebook', 'Facebook', 'preview'],
+            'Facebook' => ['https://www.facebook.com/watch/?v=123456789012', 'facebook', 'Facebook', 'preview'],
             'LinkedIn' => ['https://www.linkedin.com/posts/example-activity-1234567890123456789-abcd', 'linkedin', 'LinkedIn', 'ready'],
             'Pinterest' => ['https://www.pinterest.com/pin/615233999110252228/', 'pinterest', 'Pinterest', 'ready'],
         ];
@@ -427,7 +427,7 @@ class AnalyzeEndpointTest extends TestCase
                 'source_url' => $sourceUrl,
                 'normalized_url' => 'https://www.pinterest.com/pin/615233999110252228/',
                 'status' => 'ready',
-                'provider_maturity' => 'beta',
+                'provider_maturity' => 'available',
                 'warnings' => ["Public availability depends on Pinterest's anonymous metadata response."],
                 'metadata' => [
                     'post_id' => '615233999110252228',

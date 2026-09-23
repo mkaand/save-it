@@ -39,6 +39,11 @@ class Settings:
     tiktok_max_metadata_bytes: int = 4 * 1024 * 1024
     tiktok_max_media_bytes: int = 512 * 1024 * 1024
     tiktok_max_variants: int = 8
+    facebook_connect_timeout_seconds: float = 3.0
+    facebook_read_timeout_seconds: float = 10.0
+    facebook_max_redirects: int = 3
+    facebook_max_metadata_bytes: int = 4 * 1024 * 1024
+    facebook_max_variants: int = 4
     youtube_socket_timeout_seconds: float = 5.0
     youtube_max_source_formats: int = 500
     youtube_max_video_formats: int = 30

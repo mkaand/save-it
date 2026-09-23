@@ -51,6 +51,7 @@ def test_every_stub_returns_controlled_empty_result() -> None:
             Provider.LINKEDIN,
             Provider.PINTEREST,
             Provider.TIKTOK,
+            Provider.FACEBOOK,
         }:
             continue
         context = classify_url(_example_url(provider))
@@ -89,6 +90,12 @@ def test_tiktok_uses_production_adapter() -> None:
     registry = ProviderRegistry()
 
     assert type(registry.get(Provider.TIKTOK)).__name__ == "TikTokProviderAdapter"
+
+
+def test_facebook_uses_production_adapter() -> None:
+    registry = ProviderRegistry()
+
+    assert type(registry.get(Provider.FACEBOOK)).__name__ == "FacebookProviderAdapter"
 
 
 def _example_url(provider: Provider) -> str:

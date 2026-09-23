@@ -52,6 +52,6 @@ class PinterestProviderAdapter:
             metadata=metadata,
             assets=assets,
             capabilities=capabilities,
-            maturity="beta",
+            maturity="available",
             warnings=["Public availability depends on Pinterest's anonymous metadata response."],
         )
