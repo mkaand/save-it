@@ -21,12 +21,39 @@ class TikTokProviderAdapter:
                 parsed = urlsplit(target)
                 # The redirect client has already pinned and verified every hop.
                 # Drop server-supplied tracking/query material before strict URL parsing.
-                resolved = classify_url(urlunsplit(("https", "www.tiktok.com", parsed.path, "", "")))
+                resolved = classify_url(
+                    urlunsplit(("https", "www.tiktok.com", parsed.path, "", ""))
+                )
             except UrlValidationError as exc:
-                raise ProviderError("unsupported_url", "TikTok short links must resolve to a public video.", 422, {"provider": "tiktok"}) from exc
+                raise ProviderError(
+                    "unsupported_url",
+                    "TikTok short links must resolve to a public video.",
+                    422,
+                    {"provider": "tiktok"},
+                ) from exc
         if resolved.provider is not Provider.TIKTOK or resolved.variant != "video":
-            raise ProviderError("unsupported_url", "TikTok supports public video URLs only.", 422, {"provider": "tiktok"})
+            raise ProviderError(
+                "unsupported_url",
+                "TikTok supports public video URLs only.",
+                422,
+                {"provider": "tiktok"},
+            )
         parts = resolved.normalized_url.rstrip("/").split("/")
         username, video_id = parts[-3].lstrip("@"), parts[-1]
-        metadata, assets, media_type = parse_tiktok_video(await self.client.fetch_page(resolved.normalized_url), video_id, username)
-        return ExtractResult(request_id=request_id, provider=Provider.TIKTOK, provider_label="TikTok", normalized_url=resolved.normalized_url, variant="video", status="ready", media_type=media_type, metadata=metadata, assets=assets, capabilities=["metadata", "media_assets", "video_variants"], maturity="beta", warnings=["Public availability depends on TikTok's anonymous canonical response."])
+        metadata, assets, media_type = parse_tiktok_video(
+            await self.client.fetch_page(resolved.normalized_url), video_id, username
+        )
+        return ExtractResult(
+            request_id=request_id,
+            provider=Provider.TIKTOK,
+            provider_label="TikTok",
+            normalized_url=resolved.normalized_url,
+            variant="video",
+            status="ready",
+            media_type=media_type,
+            metadata=metadata,
+            assets=assets,
+            capabilities=["metadata", "media_assets", "video_variants"],
+            maturity="beta",
+            warnings=["Public availability depends on TikTok's anonymous canonical response."],
+        )

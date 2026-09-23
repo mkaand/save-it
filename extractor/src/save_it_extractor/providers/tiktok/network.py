@@ -21,11 +21,13 @@ from save_it_extractor.providers.errors import ProviderError
 CANONICAL_HOSTS = frozenset({"www.tiktok.com"})
 SHORT_HOSTS = frozenset({"vm.tiktok.com", "vt.tiktok.com"})
 # Observed in TikTok's canonical hydration state for direct public MP4 and covers.
-ASSET_HOSTS = frozenset({
-    "v16-webapp-prime.tiktok.com",
-    "v19-webapp-prime.tiktok.com",
-    "p16-common-sign.tiktokcdn-eu.com",
-})
+ASSET_HOSTS = frozenset(
+    {
+        "v16-webapp-prime.tiktok.com",
+        "v19-webapp-prime.tiktok.com",
+        "p16-common-sign.tiktokcdn-eu.com",
+    }
+)
 
 
 def is_allowed_asset_url(raw_url: str) -> bool:
@@ -41,9 +43,19 @@ class TikTokMetadataClient:
 
     async def resolve_short_link(self, short_url: str) -> str:
         url = short_url
-        timeout = httpx.Timeout(settings.tiktok_read_timeout_seconds, connect=settings.tiktok_connect_timeout_seconds)
+        timeout = httpx.Timeout(
+            settings.tiktok_read_timeout_seconds, connect=settings.tiktok_connect_timeout_seconds
+        )
         pinned = PinnedAsyncHTTPTransport() if self.transport is None else None
-        async with httpx.AsyncClient(timeout=timeout, trust_env=False, follow_redirects=False, transport=self.transport or pinned, headers={"User-Agent": "Save-It-Metadata-Extractor/1 (+https://github.com/mkaand/save-it)"}) as client:
+        async with httpx.AsyncClient(
+            timeout=timeout,
+            trust_env=False,
+            follow_redirects=False,
+            transport=self.transport or pinned,
+            headers={
+                "User-Agent": "Save-It-Metadata-Extractor/1 (+https://github.com/mkaand/save-it)"
+            },
+        ) as client:
             for hop in range(settings.tiktok_max_redirects + 1):
                 remote = await _validate(url, SHORT_HOSTS if hop == 0 else CANONICAL_HOSTS)
                 if pinned is not None:
@@ -66,7 +78,9 @@ class TikTokMetadataClient:
                 url = urljoin(url, location)
         raise _error("too_many_redirects", 502)
 
-    async def _request(self, initial_url: str, initial_hosts: frozenset[str], *, canonical: bool) -> str:
+    async def _request(
+        self, initial_url: str, initial_hosts: frozenset[str], *, canonical: bool
+    ) -> str:
         url = initial_url
         timeout = httpx.Timeout(
             settings.tiktok_read_timeout_seconds,
@@ -107,7 +121,9 @@ class TikTokMetadataClient:
                             raise _error("post_unavailable", 422)
                         if response.status_code >= 500:
                             raise _error("upstream_unavailable", 503)
-                        if response.status_code != 200 or content_type(response.headers.get("content-type", "")) not in {"text/html", "application/xhtml+xml"}:
+                        if response.status_code != 200 or content_type(
+                            response.headers.get("content-type", "")
+                        ) not in {"text/html", "application/xhtml+xml"}:
                             raise _error("provider_response_changed", 502)
                         try:
                             body = await read_limited(response, settings.tiktok_max_metadata_bytes)
@@ -128,7 +144,10 @@ async def _validate(url: str, hosts: frozenset[str]) -> ResolvedRemote:
     try:
         return await resolve_allowed_url(url, hosts)
     except EgressPolicyError as exc:
-        raise _error("upstream_unavailable" if exc.reason == "dns_unavailable" else "disallowed_redirect", 503 if exc.reason == "dns_unavailable" else 502) from exc
+        raise _error(
+            "upstream_unavailable" if exc.reason == "dns_unavailable" else "disallowed_redirect",
+            503 if exc.reason == "dns_unavailable" else 502,
+        ) from exc
 
 
 def _error(code: str, status: int) -> ProviderError:
@@ -136,7 +155,9 @@ def _error(code: str, status: int) -> ProviderError:
         "provider_timeout": "TikTok did not respond before the analysis deadline.",
         "upstream_unavailable": "TikTok metadata is temporarily unavailable.",
         "rate_limited_upstream": "TikTok is temporarily rate limiting public metadata requests.",
-        "authentication_required": "This TikTok post requires authentication and cannot be analyzed anonymously.",
+        "authentication_required": (
+            "This TikTok post requires authentication and cannot be analyzed anonymously."
+        ),
         "post_unavailable": "This TikTok post is unavailable or private.",
         "provider_response_changed": "TikTok returned unsupported public metadata.",
         "provider_response_too_large": "TikTok returned more metadata than the service accepts.",

@@ -33,23 +33,32 @@ def page(
                             "width": 576,
                             "height": 1024,
                             "duration": 1234,
-                            "bitrateInfo": bitrate_info or [{
-                                "PlayAddr": {"UrlList": [VIDEO]},
-                                "width": 576,
-                                "height": 1024,
-                                "Bitrate": 1000,
-                            }],
+                            "bitrateInfo": bitrate_info
+                            or [
+                                {
+                                    "PlayAddr": {"UrlList": [VIDEO]},
+                                    "width": 576,
+                                    "height": 1024,
+                                    "Bitrate": 1000,
+                                }
+                            ],
                         },
                     },
                 },
             },
         },
     }
-    return '<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">' + json.dumps(state) + "</script>"
+    return (
+        '<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">'
+        + json.dumps(state)
+        + "</script>"
+    )
 
 
 def test_canonical_and_short_urls_normalize_without_tracking() -> None:
-    canonical = classify_url("https://www.tiktok.com/@scout2015/video/6718335390845095173?share_app_id=1")
+    canonical = classify_url(
+        "https://www.tiktok.com/@scout2015/video/6718335390845095173?share_app_id=1"
+    )
     short = classify_url("https://vm.tiktok.com/ZMexample/?tracking=value")
     assert canonical.provider is Provider.TIKTOK
     assert canonical.variant == "video"
@@ -58,13 +67,16 @@ def test_canonical_and_short_urls_normalize_without_tracking() -> None:
     assert short.normalized_url == "https://vm.tiktok.com/ZMexample"
 
 
-@pytest.mark.parametrize("url", [
-    "https://www.tiktok.com/@scout2015",
-    "https://www.tiktok.com/tag/cats",
-    "https://www.tiktok.com/music/example-1",
-    "https://www.tiktok.com/live/example",
-    "https://www.tiktok.com/@scout2015/video/not-an-id",
-])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://www.tiktok.com/@scout2015",
+        "https://www.tiktok.com/tag/cats",
+        "https://www.tiktok.com/music/example-1",
+        "https://www.tiktok.com/live/example",
+        "https://www.tiktok.com/@scout2015/video/not-an-id",
+    ],
+)
 def test_non_video_urls_are_rejected(url: str) -> None:
     with pytest.raises(UrlValidationError) as exception:
         classify_url(url)
@@ -81,10 +93,22 @@ def test_parser_uses_identity_checked_structured_video_and_not_social_metadata()
 
 
 def test_parser_deterministically_prefers_the_highest_structured_mp4_variant() -> None:
-    source = page(bitrate_info=[
-        {"PlayAddr": {"UrlList": ["https://v16-webapp-prime.tiktok.com/obj/low.mp4"]}, "width": 360, "height": 640, "Bitrate": 500},
-        {"PlayAddr": {"UrlList": ["https://v19-webapp-prime.tiktok.com/obj/high.mp4"]}, "width": 720, "height": 1280, "Bitrate": 1500},
-    ])
+    source = page(
+        bitrate_info=[
+            {
+                "PlayAddr": {"UrlList": ["https://v16-webapp-prime.tiktok.com/obj/low.mp4"]},
+                "width": 360,
+                "height": 640,
+                "Bitrate": 500,
+            },
+            {
+                "PlayAddr": {"UrlList": ["https://v19-webapp-prime.tiktok.com/obj/high.mp4"]},
+                "width": 720,
+                "height": 1280,
+                "Bitrate": 1500,
+            },
+        ]
+    )
     _, assets, _ = parse_tiktok_video(source, "6718335390845095173", "scout2015")
     assert assets[0]["width"] == 720
     assert assets[0]["height"] == 1280
@@ -98,12 +122,17 @@ def test_parser_rejects_unsafe_video_hosts_and_missing_video() -> None:
     assert exception.value.code == "no_media"
 
 
-@pytest.mark.parametrize("html,video_id,username", [
-    (page(video_id="1"), "6718335390845095173", "scout2015"),
-    (page(username="other"), "6718335390845095173", "scout2015"),
-    ("<html></html>", "6718335390845095173", "scout2015"),
-])
-def test_parser_rejects_malformed_or_identity_mismatched_state(html: str, video_id: str, username: str) -> None:
+@pytest.mark.parametrize(
+    "html,video_id,username",
+    [
+        (page(video_id="1"), "6718335390845095173", "scout2015"),
+        (page(username="other"), "6718335390845095173", "scout2015"),
+        ("<html></html>", "6718335390845095173", "scout2015"),
+    ],
+)
+def test_parser_rejects_malformed_or_identity_mismatched_state(
+    html: str, video_id: str, username: str
+) -> None:
     with pytest.raises(ProviderError) as exception:
         parse_tiktok_video(html, video_id, username)
     assert exception.value.code == "provider_response_changed"
@@ -119,7 +148,11 @@ class FakeClient:
 
 
 def test_adapter_returns_beta_ready_contract_for_shortlink() -> None:
-    result = asyncio.run(TikTokProviderAdapter(client=FakeClient()).extract(classify_url("https://vm.tiktok.com/ZMexample"), "tiktok-test"))
+    result = asyncio.run(
+        TikTokProviderAdapter(client=FakeClient()).extract(
+            classify_url("https://vm.tiktok.com/ZMexample"), "tiktok-test"
+        )
+    )
     assert result.provider is Provider.TIKTOK
     assert result.status == "ready"
     assert result.media_type == "video"

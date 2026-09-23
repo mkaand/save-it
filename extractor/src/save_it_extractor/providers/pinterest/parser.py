@@ -166,11 +166,7 @@ def _preview_image(images: list[dict]) -> dict:
     includes bounded renditions, so using one here avoids silently turning a
     durable preview failure into an unavailable Recent Fetch.
     """
-    bounded = [
-        image
-        for image in images
-        if image["width"] <= 1600 and image["height"] <= 1600
-    ]
+    bounded = [image for image in images if image["width"] <= 1600 and image["height"] <= 1600]
     return bounded[0] if bounded else images[0]
 
 
