@@ -544,6 +544,38 @@ class ExtractorClientTest extends TestCase
         }
     }
 
+    public function test_facebook_reel_extraction_maps_to_safe_public_response(): void
+    {
+        $policy = Mockery::mock(UpstreamUrlPolicy::class);
+        $policy->shouldReceive('validate')->once()->andReturnUsing(static fn (string $url): string => $url);
+        $this->app->instance(UpstreamUrlPolicy::class, $policy);
+
+        Http::fake(function (Request $request) {
+            if ($request->method() === 'POST') {
+                return Http::response($this->facebookSuccessResponse($request->data()['request_id']));
+            }
+
+            return Http::response('image', 200, [
+                'Content-Type' => 'image/jpeg',
+                'Content-Length' => '5',
+            ]);
+        });
+
+        $response = $this->postJson('/api/analyze', [
+            'url' => 'https://www.facebook.com/reel/588631943886661?ref=share',
+        ])->assertOk()
+            ->assertJsonPath('data.platform', 'facebook')
+            ->assertJsonPath('data.platform_label', 'Facebook')
+            ->assertJsonPath('data.provider_maturity', 'beta')
+            ->assertJsonPath('data.media_type', 'video')
+            ->assertJsonPath('data.url', 'https://www.facebook.com/reel/588631943886661')
+            ->assertJsonPath('data.outputs.0.label', '1920×1080')
+            ->assertJsonCount(2, 'data.outputs');
+
+        $this->assertStringNotContainsString('fbcdn.net', $response->getContent());
+        $this->assertStringNotContainsString('signature=', $response->getContent());
+    }
+
     public function test_linkedin_extraction_accepts_a_long_percent_encoded_canonical_post_url(): void
     {
         $canonicalUrl = 'https://www.linkedin.com/posts/istanbul-sensorler_panasonicindustry-hgt1010-%C3%B6l%C3%A7%C3%BCmsens%C3%B6r%C3%BC-activity-7487771630123769856-Te6v/';
@@ -959,6 +991,75 @@ class ExtractorClientTest extends TestCase
                 ],
                 'assets' => $assets,
                 'capabilities' => ['metadata', 'media_assets', 'multiple_assets'],
+            ],
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function facebookSuccessResponse(string $requestId): array
+    {
+        $video = 'https://video-ams2-1.xx.fbcdn.net/v/t42/example.mp4?signature=sensitive';
+        $poster = 'https://scontent-ams2-1.xx.fbcdn.net/v/t39/poster.jpg?signature=sensitive';
+
+        return [
+            'data' => [
+                'request_id' => $requestId,
+                'provider' => 'facebook',
+                'provider_label' => 'Facebook',
+                'provider_variant' => 'reel',
+                'media_type' => 'video',
+                'normalized_url' => 'https://www.facebook.com/reel/588631943886661',
+                'status' => 'ready',
+                'provider_maturity' => 'beta',
+                'warnings' => ['Public availability depends on Facebook\'s anonymous Relay response.'],
+                'metadata' => [
+                    'post_id' => '588631943886661',
+                    'text' => 'Public Facebook Reel',
+                    'author_name' => 'Example',
+                    'author_handle' => null,
+                    'published_at' => null,
+                    'thumbnail_url' => $poster,
+                    'media_count' => 1,
+                ],
+                'assets' => [[
+                    'id' => 'asset-1',
+                    'order' => 1,
+                    'type' => 'video',
+                    'role' => 'primary',
+                    'url' => $video,
+                    'thumbnail_url' => $poster,
+                    'mime_type' => 'video/mp4',
+                    'width' => 1920,
+                    'height' => 1080,
+                    'duration_ms' => 12000,
+                    'alt_text' => null,
+                    'variants' => [[
+                        'url' => $video,
+                        'mime_type' => 'video/mp4',
+                        'protocol' => 'https',
+                        'bitrate' => null,
+                        'width' => 1920,
+                        'height' => 1080,
+                        'fps' => null,
+                        'container' => 'mp4',
+                        'quality_label' => '1920×1080',
+                        'filesize' => null,
+                        'is_preferred' => true,
+                    ], [
+                        'url' => 'https://video-ams2-1.xx.fbcdn.net/v/t42/example-sd.mp4?signature=sensitive',
+                        'mime_type' => 'video/mp4',
+                        'protocol' => 'https',
+                        'bitrate' => null,
+                        'width' => 1280,
+                        'height' => 720,
+                        'fps' => null,
+                        'container' => 'mp4',
+                        'quality_label' => '1280×720',
+                        'filesize' => null,
+                        'is_preferred' => false,
+                    ]],
+                ]],
+                'capabilities' => ['metadata', 'media_assets', 'video_variants'],
             ],
         ];
     }

@@ -91,10 +91,20 @@ def classify_url(raw_url: str, max_length: int = 2048) -> ProviderContext:
                     _normalize_tiktok_url(hostname, parsed)
                     if provider is Provider.TIKTOK
                     else (
-                        _normalize_linkedin_url(hostname, parsed)
-                        if provider is Provider.LINKEDIN
-                        else urlunsplit(
-                            (parsed.scheme.lower(), hostname, parsed.path or "/", parsed.query, "")
+                        _normalize_facebook_url(hostname, parsed)
+                        if provider is Provider.FACEBOOK
+                        else (
+                            _normalize_linkedin_url(hostname, parsed)
+                            if provider is Provider.LINKEDIN
+                            else urlunsplit(
+                                (
+                                    parsed.scheme.lower(),
+                                    hostname,
+                                    parsed.path or "/",
+                                    parsed.query,
+                                    "",
+                                )
+                            )
                         )
                     )
                 )
@@ -110,6 +120,8 @@ def classify_url(raw_url: str, max_length: int = 2048) -> ProviderContext:
         variant = "reel" if normalized.startswith("https://www.instagram.com/reel/") else "post"
     elif provider is Provider.TIKTOK:
         variant = "short" if hostname in {"vm.tiktok.com", "vt.tiktok.com"} else "video"
+    elif provider is Provider.FACEBOOK:
+        variant = "reel" if normalized.startswith("https://www.facebook.com/reel/") else "video"
     elif provider is Provider.LINKEDIN:
         if hostname == "lnkd.in":
             variant = "short"
@@ -148,6 +160,10 @@ PINTEREST_PIN_PATH = re.compile(r"^/pin/([0-9]{10,30})(?:/[^/]*)?/?$", re.IGNORE
 PINTEREST_SHORT_PATH = re.compile(r"^/[A-Za-z0-9_-]{4,64}/?$")
 TIKTOK_VIDEO_PATH = re.compile(r"^/@([A-Za-z0-9_.]{1,64})/video/([0-9]{10,30})/?$", re.IGNORECASE)
 TIKTOK_SHORT_PATH = re.compile(r"^/[A-Za-z0-9_-]{4,64}/?$")
+FACEBOOK_REEL_PATH = re.compile(r"^/reel/([0-9]{10,30})/?$", re.IGNORECASE)
+FACEBOOK_VIDEO_PATH = re.compile(
+    r"^/[A-Za-z0-9._-]{1,100}/videos/(?:[^/]+/)?([0-9]{10,30})/?$", re.IGNORECASE
+)
 INVALID_PERCENT_ENCODING = re.compile(r"%(?![A-Fa-f0-9]{2})")
 
 
@@ -284,6 +300,30 @@ def _normalize_tiktok_url(hostname: str, parsed: SplitResult) -> str:
         )
     username, video_id = match.groups()
     return f"https://www.tiktok.com/@{username}/video/{video_id}"
+
+
+def _normalize_facebook_url(hostname: str, parsed: SplitResult) -> str:
+    if hostname not in {"facebook.com", "www.facebook.com"}:
+        raise UrlValidationError(
+            "invalid_facebook_media_url", "Facebook supports public video and Reel URLs only."
+        )
+
+    reel = FACEBOOK_REEL_PATH.fullmatch(parsed.path)
+    if reel is not None:
+        return f"https://www.facebook.com/reel/{reel.group(1)}"
+
+    video = FACEBOOK_VIDEO_PATH.fullmatch(parsed.path)
+    if video is not None:
+        return f"https://www.facebook.com{parsed.path.rstrip('/')}/"
+
+    if parsed.path in {"/watch", "/watch/"}:
+        values = parse_qs(parsed.query, keep_blank_values=True).get("v", [])
+        if len(values) == 1 and re.fullmatch(r"[0-9]{10,30}", values[0]):
+            return f"https://www.facebook.com/watch/?v={values[0]}"
+
+    raise UrlValidationError(
+        "invalid_facebook_media_url", "Facebook supports public video and Reel URLs only."
+    )
 
 
 def _normalize_pinterest_url(hostname: str, parsed: SplitResult) -> str:

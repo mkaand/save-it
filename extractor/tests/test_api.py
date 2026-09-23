@@ -16,37 +16,6 @@ from save_it_extractor.domain.urls import classify_url
 client = TestClient(main.app, raise_server_exceptions=False)
 
 
-@pytest.mark.parametrize(
-    ("url", "provider", "label", "variant"),
-    [("https://www.facebook.com/example/videos/123", "facebook", "Facebook", None)],
-)
-def test_recognized_providers_return_controlled_stub_contract(
-    url: str, provider: str, label: str, variant: str | None
-) -> None:
-    response = client.post(
-        "/v1/extract",
-        json={
-            "url": url,
-            "request_id": "contract-test-1",
-            "options": {"metadata_only": True},
-        },
-    )
-
-    assert response.status_code == 501
-    assert response.headers["x-request-id"] == "contract-test-1"
-    error = response.json()["error"]
-    assert error["code"] == "provider_not_implemented"
-    assert error["request_id"] == "contract-test-1"
-    assert error["details"]["provider"] == provider
-    assert error["details"]["provider_label"] == label
-    assert error["details"]["provider_variant"] == variant
-    assert error["details"]["status"] == "not_implemented"
-    assert error["details"]["media_type"] == "unknown"
-    assert error["details"]["metadata"] is None
-    assert error["details"]["assets"] == []
-    assert error["details"]["capabilities"] == []
-
-
 def test_health_is_safe() -> None:
     response = client.get("/health")
 
@@ -141,6 +110,40 @@ def test_linkedin_success_exposes_stable_contract(monkeypatch: pytest.MonkeyPatc
     assert data["warnings"]
     assert data["status"] == "ready"
     assert "traceback" not in response.text.lower()
+
+
+def test_facebook_success_exposes_beta_video_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+    result = ExtractResult(
+        request_id="contract-test-facebook",
+        provider=Provider.FACEBOOK,
+        provider_label="Facebook",
+        normalized_url="https://www.facebook.com/reel/588631943886661",
+        variant="reel",
+        status="ready",
+        media_type="video",
+        metadata={"post_id": "588631943886661", "media_count": 1},
+        assets=[{"id": "asset-1", "type": "video", "order": 1}],
+        capabilities=["metadata", "media_assets", "video_variants"],
+        maturity="beta",
+        warnings=["Public availability depends on Facebook's anonymous Relay response."],
+    )
+    monkeypatch.setattr(main.service, "extract", AsyncMock(return_value=result))
+
+    response = client.post(
+        "/v1/extract",
+        json={
+            "url": "https://www.facebook.com/reel/588631943886661?ref=sharing",
+            "request_id": "contract-test-facebook",
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["provider"] == "facebook"
+    assert data["provider_variant"] == "reel"
+    assert data["provider_maturity"] == "beta"
+    assert data["normalized_url"] == "https://www.facebook.com/reel/588631943886661"
+    assert data["assets"] == [{"id": "asset-1", "type": "video", "order": 1}]
 
 
 def test_youtube_success_uses_versioned_data_contract(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -295,7 +298,7 @@ def test_fragment_is_removed_and_query_is_preserved() -> None:
 def test_server_generates_safe_request_id() -> None:
     response = client.post(
         "/v1/extract",
-        json={"url": "https://www.facebook.com/example/videos/123"},
+        json={"url": "https://notfacebook.example/video"},
     )
     request_id = response.json()["error"]["request_id"]
 
@@ -311,13 +314,10 @@ def test_contract_never_invokes_network_dns_or_shell(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(subprocess, "run", forbidden)
     monkeypatch.setattr(urllib.request, "urlopen", forbidden)
 
-    response = client.post(
-        "/v1/extract",
-        json={"url": "https://www.facebook.com/example/videos/123"},
-    )
+    response = client.post("/v1/extract", json={"url": "https://notfacebook.example/video"})
 
-    assert response.status_code == 501
-    assert response.json()["error"]["code"] == "provider_not_implemented"
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "unsupported_host"
 
 
 def test_internal_error_response_does_not_expose_exception(

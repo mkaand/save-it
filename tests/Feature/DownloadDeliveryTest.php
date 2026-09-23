@@ -78,6 +78,37 @@ class DownloadDeliveryTest extends TestCase
         Http::assertSentCount(1);
     }
 
+    public function test_facebook_proxy_forwards_validated_native_video_ranges_without_exposing_the_source(): void
+    {
+        Http::fake(function ($request) {
+            $this->assertSame('bytes=100-199', $request->header('Range')[0] ?? null);
+
+            return Http::response(str_repeat('x', 100), 206, [
+                'Content-Type' => 'video/mp4',
+                'Content-Length' => '100',
+                'Content-Range' => 'bytes 100-199/1000',
+                'Accept-Ranges' => 'bytes',
+            ]);
+        });
+        $source = 'https://video-ams2-1.xx.fbcdn.net/v/t42/public-video.mp4?oe=sensitive';
+        $token = $this->app->make(DownloadAssetStore::class)->issue([
+            ...$this->asset(),
+            'provider' => 'facebook',
+            'upstream_url' => $source,
+            'filename' => 'Facebook video.mp4',
+            'expected_size' => 1000,
+        ]);
+
+        $response = $this->withHeader('Range', 'bytes=100-199')->get("/api/downloads/{$token}");
+
+        $response->assertStatus(206)
+            ->assertHeader('Content-Type', 'video/mp4')
+            ->assertHeader('Content-Range', 'bytes 100-199/1000');
+        $this->assertStringNotContainsString('fbcdn.net', $response->getContent());
+        $this->assertStringNotContainsString('sensitive', $response->getContent());
+        Http::assertSentCount(1);
+    }
+
     public function test_tiktok_proxy_uses_the_internal_anonymous_media_relay_for_ranges(): void
     {
         $page = 'https://www.tiktok.com/@scout2015/video/6718335390845095173';

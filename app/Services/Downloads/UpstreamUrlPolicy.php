@@ -16,6 +16,9 @@ class UpstreamUrlPolicy
         'pinterest' => ['i.pinimg.com', 'v1.pinimg.com'],
         'tiktok' => ['v16-webapp-prime.tiktok.com', 'v19-webapp-prime.tiktok.com', 'p16-common-sign.tiktokcdn-eu.com'],
         'tiktok_session' => ['www.tiktok.com'],
+        // Facebook public Relay state currently emits regional video/poster hosts
+        // below xx.fbcdn.net; this intentionally does not permit .fbcdn.net broadly.
+        'facebook' => ['.xx.fbcdn.net'],
     ];
 
     public function validate(string $url, string $provider, bool $resolveDns = true): string

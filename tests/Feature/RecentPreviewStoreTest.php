@@ -107,6 +107,26 @@ class RecentPreviewStoreTest extends TestCase
         Http::assertSentCount(1);
     }
 
+    public function test_facebook_durable_poster_uses_the_narrow_public_cdn_policy(): void
+    {
+        $url = 'https://scontent-ams2-1.xx.fbcdn.net/v/t39/public-poster.jpg?oh=sensitive';
+        Http::fake([$url => Http::response($this->png(), 200, [
+            'Content-Type' => 'image/png',
+            'Content-Length' => (string) strlen($this->png()),
+        ])]);
+        $policy = Mockery::mock(UpstreamUrlPolicy::class);
+        $policy->shouldReceive('validate')->once()->with($url, 'facebook')->andReturn($url);
+
+        $store = $this->store($policy);
+        $identifier = $store->issue(['provider' => 'facebook', 'upstream_url' => $url]);
+        $cached = $store->resolve($identifier);
+
+        $this->assertNotNull($cached);
+        $this->assertSame('image/png', $cached['mime_type']);
+        $this->assertStringNotContainsString('fbcdn.net', json_encode($cached, JSON_THROW_ON_ERROR));
+        $this->files[] = $cached['path'];
+    }
+
     public function test_expired_orphans_are_cleaned_oldest_first_in_bounded_passes(): void
     {
         $directory = storage_path('app/private/recent-previews');

@@ -128,7 +128,7 @@ class FakeClient:
         return self.resolved
 
 
-def test_adapter_returns_beta_ready_contract_for_shortlink() -> None:
+def test_adapter_returns_available_ready_contract_for_shortlink() -> None:
     result = asyncio.run(
         PinterestProviderAdapter(client=FakeClient(payload(video=True))).extract(
             classify_url("https://pin.it/5MxsDY0"), "pinterest-test"
@@ -139,4 +139,4 @@ def test_adapter_returns_beta_ready_contract_for_shortlink() -> None:
     assert result.normalized_url == "https://www.pinterest.com/pin/615233999110252228/"
     assert result.media_type == "video"
     assert result.capabilities == ["metadata", "media_assets", "video_variants"]
-    assert result.maturity == "beta"
+    assert result.maturity == "available"
