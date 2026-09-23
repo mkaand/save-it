@@ -433,6 +433,14 @@ requests and pushes to `main`. It validates Composer metadata, dependency audits
 Laravel tests, Pint, JavaScript tests, icon generation, pytest, Ruff, the Python
 runtime audit, Docker Compose, all changed images, and matching app/Nginx manifests.
 
+## Dependency maintenance
+
+Dependency maintenance is advisory-led and uses reproducible lockfiles. Security
+fixes and compatible patch/minor releases are validated through the full CI matrix;
+major upgrades are evaluated separately with explicit migration and regression
+coverage. Do not use forced bulk audit fixes or replace a runtime dependency solely
+because a newer major version exists.
+
 ## SEO, social previews, and analytics
 
 The landing page publishes canonical, Open Graph, and Twitter Card metadata with the
