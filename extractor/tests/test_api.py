@@ -295,7 +295,7 @@ def test_fragment_is_removed_and_query_is_preserved() -> None:
 def test_server_generates_safe_request_id() -> None:
     response = client.post(
         "/v1/extract",
-        json={"url": "https://www.tiktok.com/@example/video/123"},
+            json={"url": "https://www.facebook.com/example/videos/123"},
     )
     request_id = response.json()["error"]["request_id"]
 
@@ -313,7 +313,7 @@ def test_contract_never_invokes_network_dns_or_shell(monkeypatch: pytest.MonkeyP
 
     response = client.post(
         "/v1/extract",
-        json={"url": "https://www.tiktok.com/@example/video/123"},
+        json={"url": "https://www.facebook.com/example/videos/123"},
     )
 
     assert response.status_code == 501

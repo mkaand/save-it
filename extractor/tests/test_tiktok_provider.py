@@ -1,4 +1,5 @@
 import asyncio
+import json
 from dataclasses import dataclass
 
 import pytest
@@ -13,8 +14,38 @@ VIDEO = "https://v16-webapp-prime.tiktok.com/obj/example.mp4?token=redacted"
 COVER = "https://p16-common-sign.tiktokcdn-eu.com/obj/example-cover.jpeg?token=redacted"
 
 
-def page(video_id: str = "6718335390845095173", username: str = "scout2015") -> str:
-    return f'''<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">{{"__DEFAULT_SCOPE__":{{"webapp.video-detail":{{"itemInfo":{{"itemStruct":{{"id":"{video_id}","desc":"Public video","author":{{"uniqueId":"{username}","nickname":"Scout"}},"video":{{"playAddr":"{VIDEO}","cover":"{COVER}","width":576,"height":1024,"duration":1234,"bitrateInfo":[{{"PlayAddr":{{"UrlList":["{VIDEO}"]}},"width":576,"height":1024,"Bitrate":1000}}]}}}}}}}}}}</script>'''
+def page(
+    video_id: str = "6718335390845095173",
+    username: str = "scout2015",
+    bitrate_info: list[dict] | None = None,
+) -> str:
+    state = {
+        "__DEFAULT_SCOPE__": {
+            "webapp.video-detail": {
+                "itemInfo": {
+                    "itemStruct": {
+                        "id": video_id,
+                        "desc": "Public video",
+                        "author": {"uniqueId": username, "nickname": "Scout"},
+                        "video": {
+                            "playAddr": VIDEO,
+                            "cover": COVER,
+                            "width": 576,
+                            "height": 1024,
+                            "duration": 1234,
+                            "bitrateInfo": bitrate_info or [{
+                                "PlayAddr": {"UrlList": [VIDEO]},
+                                "width": 576,
+                                "height": 1024,
+                                "Bitrate": 1000,
+                            }],
+                        },
+                    },
+                },
+            },
+        },
+    }
+    return '<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">' + json.dumps(state) + "</script>"
 
 
 def test_canonical_and_short_urls_normalize_without_tracking() -> None:
@@ -50,10 +81,10 @@ def test_parser_uses_identity_checked_structured_video_and_not_social_metadata()
 
 
 def test_parser_deterministically_prefers_the_highest_structured_mp4_variant() -> None:
-    source = page().replace(
-        '"bitrateInfo":[{"PlayAddr":{"UrlList":["https://v16-webapp-prime.tiktok.com/obj/example.mp4?token=redacted"]},"width":576,"height":1024,"Bitrate":1000}]',
-        '"bitrateInfo":[{"PlayAddr":{"UrlList":["https://v16-webapp-prime.tiktok.com/obj/low.mp4"]},"width":360,"height":640,"Bitrate":500},{"PlayAddr":{"UrlList":["https://v19-webapp-prime.tiktok.com/obj/high.mp4"]},"width":720,"height":1280,"Bitrate":1500}]',
-    )
+    source = page(bitrate_info=[
+        {"PlayAddr": {"UrlList": ["https://v16-webapp-prime.tiktok.com/obj/low.mp4"]}, "width": 360, "height": 640, "Bitrate": 500},
+        {"PlayAddr": {"UrlList": ["https://v19-webapp-prime.tiktok.com/obj/high.mp4"]}, "width": 720, "height": 1280, "Bitrate": 1500},
+    ])
     _, assets, _ = parse_tiktok_video(source, "6718335390845095173", "scout2015")
     assert assets[0]["width"] == 720
     assert assets[0]["height"] == 1280
