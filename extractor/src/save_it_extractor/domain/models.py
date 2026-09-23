@@ -10,6 +10,7 @@ class Provider(StrEnum):
     TIKTOK = "tiktok"
     FACEBOOK = "facebook"
     LINKEDIN = "linkedin"
+    PINTEREST = "pinterest"
 
 
 PROVIDER_LABELS: dict[Provider, str] = {
@@ -19,6 +20,7 @@ PROVIDER_LABELS: dict[Provider, str] = {
     Provider.TIKTOK: "TikTok",
     Provider.FACEBOOK: "Facebook",
     Provider.LINKEDIN: "LinkedIn",
+    Provider.PINTEREST: "Pinterest",
 }
 
 

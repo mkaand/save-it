@@ -8,7 +8,7 @@ media URL from the browser.
 
 Supported delivery modes:
 
-- Range-aware proxy streaming for validated X, Instagram, LinkedIn, YouTube direct
+- Range-aware proxy streaming for validated X, Instagram, Pinterest, LinkedIn, YouTube direct
   formats, M4A, and YouTube thumbnails;
 - FFmpeg stream-copy merge for separate YouTube MP4 video and M4A audio;
 - FFmpeg MP3 conversion at 128, 192, 256, or 320 kbps;

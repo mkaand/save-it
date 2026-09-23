@@ -37,6 +37,12 @@ HOST_PROVIDERS: dict[str, Provider] = {
     "www.linkedin.com": Provider.LINKEDIN,
     "m.linkedin.com": Provider.LINKEDIN,
     "lnkd.in": Provider.LINKEDIN,
+    "pinterest.com": Provider.PINTEREST,
+    "www.pinterest.com": Provider.PINTEREST,
+    "in.pinterest.com": Provider.PINTEREST,
+    "uk.pinterest.com": Provider.PINTEREST,
+    "es.pinterest.com": Provider.PINTEREST,
+    "pin.it": Provider.PINTEREST,
 }
 
 
@@ -91,6 +97,8 @@ def classify_url(raw_url: str, max_length: int = 2048) -> ProviderContext:
             )
         )
     )
+    if provider is Provider.PINTEREST:
+        normalized = _normalize_pinterest_url(hostname, parsed)
     variant = None
     if provider is Provider.YOUTUBE:
         variant = "shorts" if "/shorts/" in normalized else "video"
@@ -103,6 +111,8 @@ def classify_url(raw_url: str, max_length: int = 2048) -> ProviderContext:
             variant = "ugc_post"
         else:
             variant = "activity" if ":activity:" in normalized else "post"
+    elif provider is Provider.PINTEREST:
+        variant = "short" if hostname == "pin.it" else "pin"
 
     return ProviderContext(
         provider=provider,
@@ -128,6 +138,8 @@ LINKEDIN_URN_IN_SLUG = re.compile(
     r"(?:^|[-_])(activity|ugcPost)[-_:]([0-9]{6,30})(?:[-_]|$)", re.IGNORECASE
 )
 LINKEDIN_SHORT_PATH = re.compile(r"^/(?:p/)?([A-Za-z0-9_-]{4,128})/?$")
+PINTEREST_PIN_PATH = re.compile(r"^/pin/([0-9]{10,30})(?:/[^/]*)?/?$", re.IGNORECASE)
+PINTEREST_SHORT_PATH = re.compile(r"^/[A-Za-z0-9_-]{4,64}/?$")
 INVALID_PERCENT_ENCODING = re.compile(r"%(?![A-Fa-f0-9]{2})")
 
 
@@ -247,6 +259,22 @@ def _normalize_linkedin_url(hostname: str, parsed: SplitResult) -> str:
         "invalid_linkedin_post_url",
         "LinkedIn supports public post URLs only.",
     )
+
+
+def _normalize_pinterest_url(hostname: str, parsed: SplitResult) -> str:
+    if hostname == "pin.it":
+        if PINTEREST_SHORT_PATH.fullmatch(parsed.path) is None:
+            raise UrlValidationError(
+                "invalid_pinterest_pin_url", "Pinterest supports public Pin URLs only."
+            )
+        return f"https://pin.it/{parsed.path.strip('/')}"
+
+    match = PINTEREST_PIN_PATH.fullmatch(parsed.path)
+    if match is None:
+        raise UrlValidationError(
+            "invalid_pinterest_pin_url", "Pinterest supports public Pin URLs only."
+        )
+    return f"https://www.pinterest.com/pin/{match.group(1)}/"
 
 
 def _normalize_hostname(parsed: SplitResult) -> str:

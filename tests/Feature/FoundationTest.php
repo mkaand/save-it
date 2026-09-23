@@ -30,6 +30,8 @@ class FoundationTest extends TestCase
             ->assertSee('YouTube Shorts')
             ->assertSee('LinkedIn')
             ->assertSee('Pinterest')
+            ->assertSee('Public Pin media')
+            ->assertSee('Beta')
             ->assertSee('Planned')
             ->assertSee('Available')
             ->assertDontSee('LinkedIn Beta')

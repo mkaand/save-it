@@ -27,6 +27,12 @@ class Settings:
     linkedin_max_redirects: int = 2
     linkedin_max_metadata_bytes: int = 3 * 1024 * 1024
     linkedin_max_assets: int = 20
+    pinterest_connect_timeout_seconds: float = 3.0
+    pinterest_read_timeout_seconds: float = 8.0
+    pinterest_max_redirects: int = 4
+    pinterest_max_metadata_bytes: int = 1024 * 1024
+    pinterest_max_assets: int = 1
+    pinterest_max_variants: int = 8
     youtube_socket_timeout_seconds: float = 5.0
     youtube_max_source_formats: int = 500
     youtube_max_video_formats: int = 30

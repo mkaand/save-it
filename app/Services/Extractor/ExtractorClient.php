@@ -130,6 +130,33 @@ final class ExtractorClient
                 );
             }
 
+            if (
+                $provider === MediaPlatform::Pinterest->value
+                && is_string($code)
+                && in_array($code, [
+                    'rate_limited_upstream',
+                    'provider_timeout',
+                    'provider_response_changed',
+                    'provider_response_too_large',
+                    'upstream_unavailable',
+                    'disallowed_redirect',
+                    'too_many_redirects',
+                ], true)
+            ) {
+                throw new ExtractorException(
+                    $code,
+                    $response->status() === 502 ? 502 : 503,
+                    $requestId,
+                    match ($code) {
+                        'rate_limited_upstream' => 'Pinterest is temporarily rate limiting public metadata requests.',
+                        'provider_timeout' => 'Pinterest did not respond before the analysis deadline.',
+                        'provider_response_changed' => 'Pinterest temporarily returned an unsupported metadata format. Please try again later.',
+                        'provider_response_too_large' => 'Pinterest returned more metadata than the service accepts.',
+                        default => 'Pinterest metadata is temporarily unavailable.',
+                    },
+                );
+            }
+
             throw new ExtractorException(
                 'upstream_unavailable',
                 503,
@@ -165,6 +192,7 @@ final class ExtractorClient
                 MediaPlatform::YouTube,
                 MediaPlatform::YouTubeShorts,
                 MediaPlatform::LinkedIn,
+                MediaPlatform::Pinterest,
             ], true)
             || ($data['provider_label'] ?? null) !== $expectedLabel
             || ! $this->validReadyVariant($platform, $variant)
@@ -225,7 +253,8 @@ final class ExtractorClient
         $warnings = $data['warnings'] ?? null;
         if (
             ($platform === MediaPlatform::LinkedIn && $maturity !== 'stable')
-            || ($platform !== MediaPlatform::LinkedIn && $maturity !== null)
+            || ($platform === MediaPlatform::Pinterest && $maturity !== 'beta')
+            || (! in_array($platform, [MediaPlatform::LinkedIn, MediaPlatform::Pinterest], true) && $maturity !== null)
             || ! is_array($warnings)
             || count($warnings) > 5
         ) {
@@ -663,6 +692,7 @@ final class ExtractorClient
             MediaPlatform::YouTube => $variant === 'video',
             MediaPlatform::YouTubeShorts => $variant === 'shorts',
             MediaPlatform::LinkedIn => in_array($variant, ['post', 'activity', 'ugc_post'], true),
+            MediaPlatform::Pinterest => $variant === 'pin',
             default => false,
         };
     }
@@ -676,6 +706,7 @@ final class ExtractorClient
             MediaPlatform::X => $this->isSafeXPostUrl($url),
             MediaPlatform::Instagram => $this->isSafeInstagramUrl($url, $variant),
             MediaPlatform::LinkedIn => $this->isSafeLinkedInUrl($url, $variant),
+            MediaPlatform::Pinterest => $this->isSafePinterestUrl($url, $variant),
             MediaPlatform::YouTube, MediaPlatform::YouTubeShorts => $this->isSafeYouTubeUrl(
                 $url,
                 $platform,
@@ -704,6 +735,23 @@ final class ExtractorClient
             && ! isset($parts['port']);
     }
 
+    private function isSafePinterestUrl(string $url, mixed $variant): bool
+    {
+        $parts = parse_url($url);
+
+        return $variant === 'pin'
+            && filter_var($url, FILTER_VALIDATE_URL) !== false
+            && is_array($parts)
+            && ($parts['scheme'] ?? null) === 'https'
+            && ($parts['host'] ?? null) === 'www.pinterest.com'
+            && ! isset($parts['query'])
+            && ! isset($parts['fragment'])
+            && ! isset($parts['user'])
+            && ! isset($parts['pass'])
+            && ! isset($parts['port'])
+            && preg_match('#^/pin/[0-9]{10,30}/$#', (string) ($parts['path'] ?? '')) === 1;
+    }
+
     private function safeAssetUrl(
         mixed $url,
         MediaPlatform $platform,
@@ -728,7 +776,9 @@ final class ExtractorClient
                     : (
                         $platform === MediaPlatform::LinkedIn
                             ? ($host !== 'licdn.com' && str_ends_with($host, '.licdn.com'))
-                            : in_array($host, ['i.ytimg.com', 'img.youtube.com'], true)
+                            : ($platform === MediaPlatform::Pinterest
+                                ? in_array($host, ['i.pinimg.com', 'v1.pinimg.com'], true)
+                                : in_array($host, ['i.ytimg.com', 'img.youtube.com'], true))
                     )
             );
         if (
@@ -841,6 +891,10 @@ final class ExtractorClient
                 : null;
         }
 
+        if ($provider === MediaPlatform::Pinterest->value) {
+            return $variant === 'pin' ? MediaPlatform::Pinterest : null;
+        }
+
         return $variant === null ? MediaPlatform::tryFrom($provider) : null;
     }
 
@@ -869,12 +923,15 @@ final class ExtractorClient
             'invalid_instagram_media_url' => 'Enter a valid Instagram post or reel URL.',
             'invalid_youtube_video_url' => 'Enter a valid YouTube video or Shorts URL.',
             'invalid_linkedin_post_url' => 'LinkedIn supports public post URLs only.',
+            'invalid_pinterest_pin_url', 'unsupported_url' => 'Pinterest supports public Pin URLs only.',
             'linkedin_short_url_not_supported' => 'LinkedIn short links are not supported. Use the full public post URL.',
             'playlist_not_supported' => 'YouTube playlists are not supported. Submit a single video URL.',
             'live_not_supported' => 'YouTube live and scheduled live videos are not supported.',
-            'authentication_required' => $provider === MediaPlatform::LinkedIn->value
-                ? 'This LinkedIn post requires signing in and cannot be analyzed anonymously.'
-                : 'This video is private or requires authentication.',
+            'authentication_required' => match ($provider) {
+                MediaPlatform::LinkedIn->value => 'This LinkedIn post requires signing in and cannot be analyzed anonymously.',
+                MediaPlatform::Pinterest->value => 'This Pinterest Pin requires authentication and cannot be analyzed anonymously.',
+                default => 'This video is private or requires authentication.',
+            },
             'age_restricted' => 'Age-restricted YouTube videos are not supported.',
             'drm_protected' => 'DRM-protected YouTube media is not supported.',
             'video_unavailable' => 'This YouTube video is unavailable.',
@@ -882,6 +939,7 @@ final class ExtractorClient
                 MediaPlatform::Instagram->value => 'This public Instagram post does not contain extractable media.',
                 MediaPlatform::YouTube->value => 'This YouTube video does not expose supported media formats.',
                 MediaPlatform::LinkedIn->value => 'No downloadable media metadata was found in this public LinkedIn post.',
+                MediaPlatform::Pinterest->value => 'This public Pinterest Pin does not contain extractable media.',
                 default => 'This public X post does not contain directly attached media.',
             },
             'post_unavailable' => 'This post is unavailable, private, or requires authentication.',

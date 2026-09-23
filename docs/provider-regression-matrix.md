@@ -9,6 +9,7 @@ checks are optional and must never be required for a reliable CI run.
 | YouTube Shorts | canonical Shorts path | pinned yt-dlp metadata fixtures | unsupported/live handling | ordered direct/job outputs |
 | X | canonical status path | structured metadata fixtures | upstream/contract error mapping | ordered image/video assets |
 | Instagram | post/reel canonical paths | embed and canonical structured fixtures | provider response mapping | ordered assets and durable previews |
+| Pinterest | numeric Pin paths and safely resolved `pin.it` links | anonymous PinResource fixtures | unavailable/unsafe response mapping | original image or direct MP4 asset |
 | LinkedIn | public post/activity paths | Open Graph/JSON-LD fixtures | authwall/upstream mapping | progressive image/video assets |
 
 Optional live tests are explicitly marked and disabled in normal CI. They use only

@@ -246,10 +246,10 @@
                         <div><h3>Facebook</h3><p>Recognition only</p></div>
                         <span class="status-badge">Planned</span>
                     </article>
-                    <article class="platform-card">
+                    <article class="platform-card is-primary">
                         <span class="platform-icon-slot" data-platform-icon="pinterest" aria-hidden="true">P</span>
-                        <div><h3>Pinterest</h3><p>Recognition only</p></div>
-                        <span class="status-badge">Planned</span>
+                        <div><h3>Pinterest</h3><p>Public Pin media</p></div>
+                        <span class="status-badge status-mvp">Beta</span>
                     </article>
                     <article class="platform-card is-primary" data-linkedin-extractor-available>
                         <span class="platform-icon-slot" data-platform-icon="linkedin" aria-hidden="true">in</span>

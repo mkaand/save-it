@@ -11,6 +11,7 @@ enum MediaPlatform: string
     case X = 'x';
     case Facebook = 'facebook';
     case LinkedIn = 'linkedin';
+    case Pinterest = 'pinterest';
 
     public function label(): string
     {
@@ -22,6 +23,7 @@ enum MediaPlatform: string
             self::X => 'X',
             self::Facebook => 'Facebook',
             self::LinkedIn => 'LinkedIn',
+            self::Pinterest => 'Pinterest',
         };
     }
 

@@ -18,6 +18,7 @@ class UpstreamUrlPolicyTest extends TestCase
             'suffix attack' => ['https://video.twimg.com.evil.example/file.mp4', 'x'],
             'bare suffix' => ['https://licdn.com/file.mp4', 'linkedin'],
             'wrong provider' => ['https://dms.licdn.com/file.mp4', 'instagram'],
+            'Pinterest suffix attack' => ['https://i.pinimg.com.evil.example/file.jpg', 'pinterest'],
         ];
     }
 
@@ -44,6 +45,10 @@ class UpstreamUrlPolicyTest extends TestCase
         $this->assertSame(
             'https://rr1.googlevideo.com/file',
             $policy->validate('https://rr1.googlevideo.com/file', 'youtube', false),
+        );
+        $this->assertSame(
+            'https://i.pinimg.com/originals/file.jpg',
+            $policy->validate('https://i.pinimg.com/originals/file.jpg', 'pinterest', false),
         );
     }
 
