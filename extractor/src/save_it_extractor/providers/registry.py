@@ -2,6 +2,7 @@ from save_it_extractor.domain.models import Provider
 from save_it_extractor.providers.base import ProviderAdapter
 from save_it_extractor.providers.instagram import InstagramProviderAdapter
 from save_it_extractor.providers.linkedin import LinkedInProviderAdapter
+from save_it_extractor.providers.pinterest import PinterestProviderAdapter
 from save_it_extractor.providers.stubs import StubProviderAdapter
 from save_it_extractor.providers.x import XProviderAdapter
 from save_it_extractor.providers.youtube import YouTubeProviderAdapter
@@ -21,7 +22,11 @@ class ProviderRegistry:
                     else (
                         LinkedInProviderAdapter()
                         if provider is Provider.LINKEDIN
-                        else StubProviderAdapter(provider)
+                        else (
+                            PinterestProviderAdapter()
+                            if provider is Provider.PINTEREST
+                            else StubProviderAdapter(provider)
+                        )
                     )
                 )
             )

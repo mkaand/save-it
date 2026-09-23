@@ -25,6 +25,8 @@ def test_every_provider_has_an_adapter() -> None:
         ("facebook.com", Provider.FACEBOOK),
         ("fb.watch", Provider.FACEBOOK),
         ("linkedin.com", Provider.LINKEDIN),
+        ("pinterest.com", Provider.PINTEREST),
+        ("pin.it", Provider.PINTEREST),
     ],
 )
 def test_aliases_map_to_expected_provider(hostname: str, provider: Provider) -> None:
@@ -42,7 +44,13 @@ def test_every_stub_returns_controlled_empty_result() -> None:
     registry = ProviderRegistry()
 
     for provider in Provider:
-        if provider in {Provider.X, Provider.INSTAGRAM, Provider.YOUTUBE, Provider.LINKEDIN}:
+        if provider in {
+            Provider.X,
+            Provider.INSTAGRAM,
+            Provider.YOUTUBE,
+            Provider.LINKEDIN,
+            Provider.PINTEREST,
+        }:
             continue
         context = classify_url(_example_url(provider))
         result = asyncio.run(registry.get(provider).extract(context, "registry-test"))
@@ -70,6 +78,12 @@ def test_linkedin_uses_production_adapter() -> None:
     assert type(registry.get(Provider.LINKEDIN)).__name__ == "LinkedInProviderAdapter"
 
 
+def test_pinterest_uses_production_adapter() -> None:
+    registry = ProviderRegistry()
+
+    assert type(registry.get(Provider.PINTEREST)).__name__ == "PinterestProviderAdapter"
+
+
 def _example_url(provider: Provider) -> str:
     return {
         Provider.X: "https://x.com/example/status/1",
@@ -78,4 +92,5 @@ def _example_url(provider: Provider) -> str:
         Provider.TIKTOK: "https://tiktok.com/@example/video/1",
         Provider.FACEBOOK: "https://facebook.com/example/videos/1",
         Provider.LINKEDIN: "https://linkedin.com/posts/example",
+        Provider.PINTEREST: "https://www.pinterest.com/pin/615233999110252228/",
     }[provider]

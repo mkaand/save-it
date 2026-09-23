@@ -57,6 +57,7 @@ final class MediaUrlAnalyzer
                 MediaPlatform::YouTube,
                 MediaPlatform::YouTubeShorts,
                 MediaPlatform::LinkedIn,
+                MediaPlatform::Pinterest,
             ], true)
         ) {
             return $this->providerResult($recognition);
@@ -804,6 +805,7 @@ final class MediaUrlAnalyzer
             MediaPlatform::X => 'X media',
             MediaPlatform::Facebook => 'Facebook media',
             MediaPlatform::LinkedIn => 'LinkedIn media',
+            MediaPlatform::Pinterest => 'Pinterest media',
         };
     }
 

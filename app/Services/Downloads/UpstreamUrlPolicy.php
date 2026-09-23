@@ -13,6 +13,7 @@ class UpstreamUrlPolicy
         'instagram' => ['.cdninstagram.com', '.fbcdn.net'],
         'linkedin' => ['.licdn.com'],
         'youtube' => ['.googlevideo.com', 'i.ytimg.com', 'img.youtube.com'],
+        'pinterest' => ['i.pinimg.com', 'v1.pinimg.com'],
     ];
 
     public function validate(string $url, string $provider, bool $resolveDns = true): string

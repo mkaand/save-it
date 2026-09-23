@@ -24,6 +24,7 @@ class AnalyzeEndpointTest extends TestCase
             'Twitter' => ['https://twitter.com/saveit/status/123456', 'x', 'X', 'preview'],
             'Facebook' => ['https://www.facebook.com/watch/?v=123456', 'facebook', 'Facebook', 'preview'],
             'LinkedIn' => ['https://www.linkedin.com/posts/example-activity-1234567890123456789-abcd', 'linkedin', 'LinkedIn', 'ready'],
+            'Pinterest' => ['https://www.pinterest.com/pin/615233999110252228/', 'pinterest', 'Pinterest', 'ready'],
         ];
     }
 
@@ -298,6 +299,12 @@ class AnalyzeEndpointTest extends TestCase
                 );
             }
 
+            if ($provider === 'pinterest') {
+                return Http::response(
+                    $this->pinterestSuccessResponse($requestId, $effectiveUrl),
+                );
+            }
+
             return Http::response([
                 'error' => [
                     'code' => 'provider_not_implemented',
@@ -408,6 +415,41 @@ class AnalyzeEndpointTest extends TestCase
     /**
      * @return array<string, mixed>
      */
+    private function pinterestSuccessResponse(string $requestId, string $sourceUrl): array
+    {
+        return [
+            'data' => [
+                'request_id' => $requestId,
+                'provider' => 'pinterest',
+                'provider_label' => 'Pinterest',
+                'provider_variant' => 'pin',
+                'media_type' => 'image',
+                'source_url' => $sourceUrl,
+                'normalized_url' => 'https://www.pinterest.com/pin/615233999110252228/',
+                'status' => 'ready',
+                'provider_maturity' => 'beta',
+                'warnings' => ["Public availability depends on Pinterest's anonymous metadata response."],
+                'metadata' => [
+                    'post_id' => '615233999110252228',
+                    'text' => 'Public Pin',
+                    'author_name' => 'Example author',
+                    'author_handle' => 'example_author',
+                    'published_at' => null,
+                    'thumbnail_url' => 'https://i.pinimg.com/originals/example.jpg',
+                    'media_count' => 1,
+                ],
+                'assets' => [[
+                    'id' => 'asset-1', 'order' => 1, 'type' => 'image', 'role' => 'primary',
+                    'url' => 'https://i.pinimg.com/originals/example.jpg',
+                    'thumbnail_url' => 'https://i.pinimg.com/originals/example.jpg',
+                    'mime_type' => 'image/jpeg', 'width' => 2400, 'height' => 1600,
+                    'duration_ms' => null, 'alt_text' => null, 'variants' => [],
+                ]],
+                'capabilities' => ['metadata', 'media_assets'],
+            ],
+        ];
+    }
+
     private function linkedinSuccessResponse(string $requestId, string $sourceUrl): array
     {
         return [

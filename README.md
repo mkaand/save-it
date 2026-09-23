@@ -16,14 +16,14 @@ of scope.
 - System-aware light and dark themes with a versioned browser preference
 - Local platform brand glyphs with no runtime third-party requests
 - Anonymous use with no accounts or authentication
-- URL recognition for YouTube, YouTube Shorts, Instagram, TikTok, X/Twitter, Facebook, and LinkedIn
+- URL recognition for YouTube, YouTube Shorts, Instagram, Pinterest, TikTok, X/Twitter, Facebook, and LinkedIn
 - Real metadata analysis for public YouTube videos and Shorts
 - Validated YouTube thumbnails, ordered MP4/WebM video formats, and M4A/WebM audio formats
 - Five browser-local Recent Fetches stored in `localStorage`
 - Stateless JSON liveness endpoint and dependency-aware readiness endpoint
 - Docker services for PHP-FPM, Nginx, Redis, the queue worker, and scheduler
 - Internal Python 3.12 extractor service with FastAPI, Pydantic, and versioned API v1
-- Exact-host provider registry with X, Instagram, YouTube, and LinkedIn adapters and controlled stubs for other providers
+- Exact-host provider registry with X, Instagram, Pinterest, YouTube, and LinkedIn adapters and controlled stubs for other providers
 - X public post metadata, ordered assets, and source video variants
 - Instagram public post/reel metadata and ordered image/video carousel assets
 - Open Graph, Twitter Card, robots, sitemap, manifest, and local social-preview assets
@@ -39,6 +39,7 @@ Platform labels describe the current implementation:
 - Instagram: public post/reel extraction and individual/ZIP delivery available
 - YouTube and YouTube Shorts: direct formats, MP4 merge, M4A, MP3, and thumbnails available
 - LinkedIn: public post analysis and progressive public-media delivery available
+- Pinterest: anonymous public Pin image/video extraction and secure delivery available in Beta
 - TikTok and Facebook: URL recognition; extraction is planned
 
 ## Analyze endpoint
@@ -58,9 +59,9 @@ The endpoint delegates authoritative provider recognition to the internal extrac
 - uses exact hostname matching to prevent suffix attacks;
 - rejects embedded credentials, custom ports, localhost, and IP address URLs;
 - does not fetch arbitrary submitted URLs or store server-side analysis history;
-- permits X, Instagram, and LinkedIn adapters to fetch canonical, service-constructed metadata URLs;
+- permits X, Instagram, Pinterest, and LinkedIn adapters to fetch canonical, service-constructed metadata URLs;
 - submits only strictly canonical YouTube video URLs to the pinned yt-dlp library API;
-- returns real X, Instagram, YouTube, and LinkedIn metadata, short-lived Save It delivery references, or normalized previews for stubs;
+- returns real X, Instagram, Pinterest, YouTube, and LinkedIn metadata, short-lived Save It delivery references, or normalized previews for stubs;
 - is limited to 30 requests per minute per client IP.
 
 Laravel calls `POST http://extractor:8000/v1/extract` with explicit connect and total
@@ -81,6 +82,7 @@ Supported normalized hosts include:
 - `x.com`, `www.x.com`, `twitter.com`, `www.twitter.com`, `mobile.twitter.com`
 - `facebook.com`, `www.facebook.com`, `m.facebook.com`, `fb.watch`
 - `linkedin.com`, `www.linkedin.com`, `m.linkedin.com`
+- `pinterest.com`, `www.pinterest.com`, `in.pinterest.com`, `uk.pinterest.com`, `es.pinterest.com`, `pin.it`
 
 ## Python extractor service
 
@@ -91,7 +93,7 @@ host network, or production source bind mount.
 
 `POST /v1/extract` accepts metadata-only requests up to 8 KiB and URLs up to 2,048
 characters. Pydantic rejects unknown fields. The provider registry classifies X,
-Instagram, YouTube (including the Shorts subtype), TikTok, Facebook, and LinkedIn.
+Instagram, Pinterest, YouTube (including the Shorts subtype), TikTok, Facebook, and LinkedIn.
 The X adapter accepts only canonical status paths, fetches bounded structured
 metadata from `cdn.syndication.twimg.com`, and emits allowlisted
 `pbs.twimg.com`/`video.twimg.com` asset references. The Instagram adapter accepts only
@@ -102,6 +104,11 @@ HTML metadata, and emits only allowlisted `*.licdn.com` asset references. TikTok
 Facebook remain `not_implemented` stubs. The YouTube adapter accepts only canonical
 video and Shorts URLs and uses the pinned yt-dlp Python library API in metadata-only
 mode.
+
+The Pinterest adapter accepts only public numeric `/pin/<id>/` URLs and safely
+resolved `pin.it` links. It uses Pinterest's bounded anonymous `PinResource` JSON
+response rather than HTML URL scraping, selects the largest structured image or a
+direct MP4 variant, and emits only `i.pinimg.com` or `v1.pinimg.com` assets.
 
 The service uses these non-secret settings:
 
