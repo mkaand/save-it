@@ -836,11 +836,14 @@ final class ExtractorClient
         $parts = parse_url($url);
         $path = (string) ($parts['path'] ?? '');
         $query = (string) ($parts['query'] ?? '');
+        $videoIdQuery = preg_match('/^v=[0-9]{10,30}$/', $query) === 1;
+        $storyQuery = preg_match('/^story_fbid=[0-9]{10,30}&id=[0-9]{10,30}$/', $query) === 1;
         $validPath = $variant === 'reel'
             ? preg_match('#^/reel/[0-9]{10,30}$#', $path) === 1 && $query === ''
             : ($variant === 'video' && (
                 (preg_match('#^/[A-Za-z0-9._-]{1,100}/videos/(?:[A-Za-z0-9._-]{1,160}/)?[0-9]{10,30}/$#', $path) === 1 && $query === '')
-                || (in_array($path, ['/watch', '/watch/'], true) && preg_match('/^v=[0-9]{10,30}$/', $query) === 1)
+                || (in_array($path, ['/watch', '/watch/', '/video.php'], true) && $videoIdQuery)
+                || ($path === '/story.php' && $storyQuery)
             ));
 
         return filter_var($url, FILTER_VALIDATE_URL) !== false

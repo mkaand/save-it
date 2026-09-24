@@ -32,6 +32,7 @@ HOST_PROVIDERS: dict[str, Provider] = {
     "facebook.com": Provider.FACEBOOK,
     "www.facebook.com": Provider.FACEBOOK,
     "m.facebook.com": Provider.FACEBOOK,
+    "web.facebook.com": Provider.FACEBOOK,
     "fb.watch": Provider.FACEBOOK,
     "linkedin.com": Provider.LINKEDIN,
     "www.linkedin.com": Provider.LINKEDIN,
@@ -160,10 +161,12 @@ PINTEREST_PIN_PATH = re.compile(r"^/pin/([0-9]{10,30})(?:/[^/]*)?/?$", re.IGNORE
 PINTEREST_SHORT_PATH = re.compile(r"^/[A-Za-z0-9_-]{4,64}/?$")
 TIKTOK_VIDEO_PATH = re.compile(r"^/@([A-Za-z0-9_.]{1,64})/video/([0-9]{10,30})/?$", re.IGNORECASE)
 TIKTOK_SHORT_PATH = re.compile(r"^/[A-Za-z0-9_-]{4,64}/?$")
-FACEBOOK_REEL_PATH = re.compile(r"^/reel/([0-9]{10,30})/?$", re.IGNORECASE)
+FACEBOOK_REEL_PATH = re.compile(r"^/reels?/([0-9]{10,30})/?$", re.IGNORECASE)
 FACEBOOK_VIDEO_PATH = re.compile(
     r"^/[A-Za-z0-9._-]{1,100}/videos/(?:[^/]+/)?([0-9]{10,30})/?$", re.IGNORECASE
 )
+FACEBOOK_SHARE_PATH = re.compile(r"^/share/[rv]/[A-Za-z0-9_-]{5,128}/?$", re.IGNORECASE)
+FACEBOOK_SHORT_PATH = re.compile(r"^/[A-Za-z0-9_-]{5,128}/?$")
 INVALID_PERCENT_ENCODING = re.compile(r"%(?![A-Fa-f0-9]{2})")
 
 
@@ -303,7 +306,14 @@ def _normalize_tiktok_url(hostname: str, parsed: SplitResult) -> str:
 
 
 def _normalize_facebook_url(hostname: str, parsed: SplitResult) -> str:
-    if hostname not in {"facebook.com", "www.facebook.com"}:
+    if hostname == "fb.watch":
+        if FACEBOOK_SHORT_PATH.fullmatch(parsed.path) is None:
+            raise UrlValidationError(
+                "invalid_facebook_media_url", "Facebook supports public video and Reel URLs only."
+            )
+        return f"https://fb.watch/{parsed.path.strip('/')}"
+
+    if hostname not in {"facebook.com", "www.facebook.com", "m.facebook.com", "web.facebook.com"}:
         raise UrlValidationError(
             "invalid_facebook_media_url", "Facebook supports public video and Reel URLs only."
         )
@@ -320,6 +330,30 @@ def _normalize_facebook_url(hostname: str, parsed: SplitResult) -> str:
         values = parse_qs(parsed.query, keep_blank_values=True).get("v", [])
         if len(values) == 1 and re.fullmatch(r"[0-9]{10,30}", values[0]):
             return f"https://www.facebook.com/watch/?v={values[0]}"
+
+    if parsed.path == "/video.php":
+        values = parse_qs(parsed.query, keep_blank_values=True).get("v", [])
+        if len(values) == 1 and re.fullmatch(r"[0-9]{10,30}", values[0]):
+            return f"https://www.facebook.com/video.php?v={values[0]}"
+
+    if parsed.path in {"/story.php", "/permalink.php"}:
+        values = parse_qs(parsed.query, keep_blank_values=True)
+        story = values.get("story_fbid", [])
+        owner = values.get("id", [])
+        if (
+            len(story) == 1
+            and len(owner) == 1
+            and re.fullmatch(r"[0-9]{10,30}", story[0])
+            and re.fullmatch(r"[0-9]{10,30}", owner[0])
+        ):
+            return f"https://www.facebook.com/story.php?story_fbid={story[0]}&id={owner[0]}"
+
+    if FACEBOOK_SHARE_PATH.fullmatch(parsed.path) is not None:
+        return f"https://www.facebook.com{parsed.path.rstrip('/')}"
+
+    post = re.fullmatch(r"^/[A-Za-z0-9._-]{1,100}/posts/(?:[^/]+/)?([0-9]{10,30})/?$", parsed.path)
+    if post is not None:
+        return f"https://www.facebook.com{parsed.path.rstrip('/')}/"
 
     raise UrlValidationError(
         "invalid_facebook_media_url", "Facebook supports public video and Reel URLs only."

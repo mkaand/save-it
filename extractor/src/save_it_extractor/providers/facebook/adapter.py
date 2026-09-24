@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
+from urllib.parse import parse_qs, urlsplit
 
 from save_it_extractor.domain.models import ExtractResult, Provider, ProviderContext
+from save_it_extractor.domain.urls import UrlValidationError, classify_url
 from save_it_extractor.providers.errors import ProviderError
 from save_it_extractor.providers.facebook.network import FacebookMetadataClient
 from save_it_extractor.providers.facebook.parser import parse_facebook_video
@@ -19,16 +21,26 @@ class FacebookProviderAdapter:
                 422,
                 {"provider": "facebook"},
             )
-        video_id = _video_id(context.normalized_url)
+        page = await self.client.fetch_page(context.normalized_url)
+        # Test clients may intentionally provide only HTML. Production clients
+        # retain the validated terminal page URL after a bounded redirect chain.
+        page_url = page.url if hasattr(page, "url") else context.normalized_url
+        html = page.html if hasattr(page, "html") else page
+        try:
+            resolved = classify_url(page_url)
+        except UrlValidationError as exc:
+            raise ProviderError("provider_response_changed", "Facebook returned unsupported public metadata.", 502, {"provider": "facebook"}) from exc
+        video_id, story_id = _identities(resolved.normalized_url)
         metadata, assets, media_type = parse_facebook_video(
-            await self.client.fetch_page(context.normalized_url), video_id
+            html, expected_video_id=video_id, story_id=story_id
         )
+        await self._enrich_native_renditions(assets)
         return ExtractResult(
             request_id=request_id,
             provider=Provider.FACEBOOK,
             provider_label="Facebook",
-            normalized_url=context.normalized_url,
-            variant=context.variant,
+            normalized_url=resolved.normalized_url,
+            variant=resolved.variant or "video",
             status="ready",
             media_type=media_type,
             metadata=metadata,
@@ -38,8 +50,41 @@ class FacebookProviderAdapter:
             warnings=["Public availability depends on Facebook's anonymous Relay response."],
         )
 
+    async def _enrich_native_renditions(self, assets: list[dict]) -> None:
+        """Use bounded MP4 headers, not parent post dimensions, for labels."""
+        if not hasattr(self.client, "probe_mp4"):
+            return
+        for asset in assets:
+            variants = asset.get("variants")
+            if not isinstance(variants, list):
+                continue
+            for variant in variants:
+                if not isinstance(variant, dict) or not isinstance(variant.get("url"), str):
+                    continue
+                info = await self.client.probe_mp4(variant["url"])
+                if info is None:
+                    continue
+                width, height = info.get("width"), info.get("height")
+                if not isinstance(width, int) or not isinstance(height, int):
+                    continue
+                variant["width"] = width
+                variant["height"] = height
+                native = (variant.get("quality_label") or "").split(" · ", 1)[0]
+                native = native if native in {"HD", "SD"} else None
+                bitrate = variant.get("bitrate")
+                pieces = [native, f"{width}×{height}"]
+                if isinstance(bitrate, int) and bitrate > 0:
+                    pieces.append(f"{bitrate / 1_000_000:.1f} Mbps")
+                variant["quality_label"] = " · ".join(piece for piece in pieces if piece)
 
-def _video_id(url: str) -> str:
-    if "?v=" in url:
-        return url.split("?v=", 1)[1]
-    return url.rstrip("/").split("/")[-1]
+
+def _identities(url: str) -> tuple[str | None, str | None]:
+    parsed = urlsplit(url)
+    values = parse_qs(parsed.query)
+    if parsed.path == "/story.php":
+        story = values.get("story_fbid", [])
+        return None, story[0] if len(story) == 1 else None
+    if parsed.path in {"/watch", "/video.php"}:
+        values = values.get("v", [])
+        return (values[0] if len(values) == 1 else None), None
+    return parsed.path.rstrip("/").split("/")[-1], None

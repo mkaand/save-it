@@ -18,7 +18,7 @@ class UpstreamUrlPolicy
         'tiktok_session' => ['www.tiktok.com'],
         // Facebook public Relay state currently emits regional video/poster hosts
         // below xx.fbcdn.net; this intentionally does not permit .fbcdn.net broadly.
-        'facebook' => ['.xx.fbcdn.net'],
+        'facebook' => ['.xx.fbcdn.net', '.fna.fbcdn.net'],
     ];
 
     public function validate(string $url, string $provider, bool $resolveDns = true): string
