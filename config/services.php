@@ -66,6 +66,7 @@ return [
         'share_max_file_bytes' => 104_857_600,
         'share_preparation_ttl_seconds' => 600,
         'share_ffmpeg_binary' => '/usr/bin/ffmpeg',
+        'share_ffprobe_binary' => '/usr/bin/ffprobe',
     ],
 
     'abuse_limits' => $abuseLimits,

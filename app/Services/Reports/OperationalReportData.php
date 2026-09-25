@@ -17,11 +17,15 @@ final class OperationalReportData
         $jobs = (int) $snapshot['queue']['failed_jobs'];
         $status = $jobs > 0 ? 'Review needed' : ($failed > 0 ? 'Activity with errors' : ($total > 0 ? 'No reported errors' : 'No recorded activity'));
         $labels = ['youtube' => 'YouTube', 'youtube_shorts' => 'YouTube Shorts', 'x' => 'X', 'instagram' => 'Instagram', 'linkedin' => 'LinkedIn', 'pinterest' => 'Pinterest', 'tiktok' => 'TikTok', 'facebook' => 'Facebook'];
-        $providers = $rows->groupBy('provider')->map(function (Collection $items, string $provider) use ($labels, $total): array {
+        // Do not present provider-less generic operations (rate limits, token
+        // errors, etc.) as a fictional "Unknown provider" workload.
+        $providerRows = $rows->reject(fn ($row): bool => $row->provider === 'unknown');
+        $providerTotal = (int) $providerRows->sum('count');
+        $providers = $providerRows->groupBy('provider')->map(function (Collection $items, string $provider) use ($labels, $providerTotal): array {
             $count = (int) $items->sum('count');
             $success = (int) $items->where('successful', true)->sum('count');
 
-            return ['label' => $labels[$provider] ?? 'Unknown / unclassified', 'count' => $count, 'success' => $success, 'errors' => $count - $success, 'rate' => $this->rate($success, $count), 'percent' => $this->percent($count, $total)];
+            return ['label' => $labels[$provider] ?? 'Unknown / unclassified', 'count' => $count, 'success' => $success, 'errors' => $count - $success, 'rate' => $this->rate($success, $count), 'percent' => $this->percent($count, $providerTotal)];
         })->sortByDesc('count')->values()->all();
 
         $errors = $this->breakdown($rows->where('successful', false), 'error_code', $failed,

@@ -13,7 +13,7 @@ final class ShareMediaPreparationService
         private readonly ShareMediaPreparationStore $preparations,
     ) {}
 
-    /** @return array{id: string, filename: string} */
+    /** @return array{id: string, filename: string, provider: string} */
     public function prepare(string $token): array
     {
         $asset = $this->downloads->resolve($token);
@@ -53,7 +53,11 @@ final class ShareMediaPreparationService
             }
             chmod($path, 0600);
 
-            return ['id' => $this->preparations->issue($path, $this->filename($asset)), 'filename' => $this->filename($asset)];
+            return [
+                'id' => $this->preparations->issue($path, $this->filename($asset)),
+                'filename' => $this->filename($asset),
+                'provider' => is_string($asset['provider'] ?? null) ? $asset['provider'] : 'unknown',
+            ];
         } finally {
             File::deleteDirectory($work);
         }
@@ -96,6 +100,52 @@ final class ShareMediaPreparationService
         fclose($pipes[2]);
         $exitCode = proc_close($process);
         if ($exitCode !== 0 || ! is_file($output)) {
+            throw new DownloadException('share_unavailable', 422, 'This file cannot be prepared for sharing.');
+        }
+        // Safari can play VP9-in-MP4 while iOS Photos rejects it after Web
+        // Share. Preserve compatible streams; convert only incompatible video.
+        if ($this->requiresIosCompatibility($output)) {
+            $compatible = dirname($output).'/ios-compatible.mp4';
+            $this->transcodeForIos($output, $compatible, $limit);
+            if (! rename($compatible, $output)) {
+                throw new DownloadException('share_unavailable', 503, 'The file could not be prepared for sharing.');
+            }
+        }
+    }
+
+    private function requiresIosCompatibility(string $path): bool
+    {
+        $command = [(string) config('services.downloads.share_ffprobe_binary', 'ffprobe'), '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=codec_name,pix_fmt', '-of', 'json', $path];
+        $pipes = [];
+        $process = proc_open($command, [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, null, [], ['bypass_shell' => true]);
+        if (! is_resource($process)) {
+            throw new DownloadException('share_unavailable', 503, 'The file could not be prepared for sharing.');
+        }
+        fclose($pipes[0]);
+        $stdout = stream_get_contents($pipes[1], 65_536);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        if (proc_close($process) !== 0) {
+            throw new DownloadException('share_unavailable', 422, 'This file cannot be prepared for sharing.');
+        }
+        $stream = json_decode($stdout, true)['streams'][0] ?? null;
+
+        return ! is_array($stream) || ($stream['codec_name'] ?? null) !== 'h264' || ! str_starts_with((string) ($stream['pix_fmt'] ?? ''), 'yuv420p');
+    }
+
+    private function transcodeForIos(string $input, string $output, int $limit): void
+    {
+        $command = [(string) config('services.downloads.share_ffmpeg_binary'), '-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-i', $input, '-map', '0:v:0', '-map', '0:a?', '-map_metadata', '-1', '-map_chapters', '-1', '-c:v', 'libx264', '-c:a', 'aac', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-fs', (string) $limit, $output];
+        $pipes = [];
+        $process = proc_open($command, [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, null, [], ['bypass_shell' => true]);
+        if (! is_resource($process)) {
+            throw new DownloadException('share_unavailable', 503, 'The file could not be prepared for sharing.');
+        }
+        fclose($pipes[0]);
+        stream_get_contents($pipes[2], 65_536);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        if (proc_close($process) !== 0 || ! is_file($output)) {
             throw new DownloadException('share_unavailable', 422, 'This file cannot be prepared for sharing.');
         }
     }
