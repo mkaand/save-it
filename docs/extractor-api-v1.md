@@ -304,9 +304,7 @@ are rejected. Login walls and access restrictions return controlled errors.
 
 ## Provider recognition response
 
-TikTok and Facebook remain controlled stubs. A
-recognized URL for one of them returns HTTP `501` with
-`provider_not_implemented`:
+Unsupported providers return HTTP `501` with `provider_not_implemented`:
 
 ```json
 {
@@ -331,7 +329,9 @@ recognized URL for one of them returns HTTP `501` with
 ```
 
 Laravel validates this shape and maps it to the existing public preview response. It
-does not expose the internal service address or Python error internals.
+does not expose the internal service address or Python error internals. TikTok and
+Facebook public video providers instead return the normal validated ready-media
+contract when their anonymous public metadata is available.
 
 ## Error response
 

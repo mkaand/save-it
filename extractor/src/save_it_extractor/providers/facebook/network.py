@@ -1,11 +1,15 @@
 """Pinned anonymous metadata client for Facebook's public video/Reel pages."""
 
+import json
+import re
 from dataclasses import dataclass
-from urllib.parse import urljoin
+from struct import unpack
+from urllib.parse import urlencode, urljoin, urlsplit
 
 import httpx
 
 from save_it_extractor.config import settings
+from save_it_extractor.domain.urls import UrlValidationError, classify_url
 from save_it_extractor.providers.egress import (
     EgressPolicyError,
     EgressResponseTooLarge,
@@ -17,11 +21,24 @@ from save_it_extractor.providers.egress import (
     resolve_allowed_url,
 )
 from save_it_extractor.providers.errors import ProviderError
+from save_it_extractor.providers.facebook.embeds import (
+    direct_video_target,
+    oembed_video_target,
+    post_embed_target,
+)
 
-CANONICAL_HOSTS = frozenset({"www.facebook.com"})
+CANONICAL_HOSTS = frozenset(
+    {
+        "facebook.com",
+        "www.facebook.com",
+        "m.facebook.com",
+        "web.facebook.com",
+        "fb.watch",
+    }
+)
 # Facebook's observed public video and static-poster delivery hosts are regional
 # children of xx.fbcdn.net. This is intentionally narrower than .fbcdn.net.
-ASSET_HOSTS = frozenset({".xx.fbcdn.net"})
+ASSET_HOSTS = frozenset({".xx.fbcdn.net", ".fna.fbcdn.net"})
 COBALT_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -44,7 +61,77 @@ def is_allowed_asset_url(raw_url: str) -> bool:
 class FacebookMetadataClient:
     transport: httpx.AsyncBaseTransport | None = None
 
-    async def fetch_page(self, canonical_url: str) -> str:
+    async def fetch_page(self, canonical_url: str) -> "FacebookPage":
+        original = classify_url(canonical_url)
+        if urlsplit(original.normalized_url).hostname == "fb.watch":
+            # Meta's tokenless, public oEmbed response provides the canonical
+            # video even when the document shortlink edge returns a login loop.
+            payload = await self._public_surface(
+                "https://graph.facebook.com/v26.0/oembed_video?"
+                + urlencode({"url": canonical_url, "omitscript": "true"}),
+                frozenset({"graph.facebook.com"}),
+                "application/json",
+            )
+            try:
+                target = oembed_video_target(json.loads(payload))
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise _error("provider_response_changed", 502) from exc
+            return await self._fetch_document(target)
+        page = await self._fetch_document(canonical_url)
+        parsed = urlsplit(page.url)
+        if parsed.path in {"/story.php", "/permalink.php"} or "/posts/" in parsed.path:
+            # Resolve the primary player in the official embed for this exact
+            # post, rather than confusing its story ID with the attached video.
+            target_context = classify_url(page.url)
+            embed = await self._public_surface(
+                "https://www.facebook.com/plugins/post.php?"
+                + urlencode({"href": target_context.normalized_url, "show_text": "true"}),
+                frozenset({"www.facebook.com"}),
+                "text/html",
+            )
+            return await self._fetch_document(post_embed_target(embed))
+        expected, actual = (
+            direct_video_target(original.normalized_url),
+            direct_video_target(page.url),
+        )
+        if expected and (actual is None or actual[1] != expected[1]):
+            raise _error("provider_response_changed", 502)
+        return page
+
+    async def _public_surface(self, url: str, hosts: frozenset[str], mime: str) -> str:
+        """Isolated empty cookie jar; no page cookies or credentials enter Graph."""
+        pinned = PinnedAsyncHTTPTransport() if self.transport is None else None
+        try:
+            remote = await resolve_allowed_url(url, hosts)
+        except EgressPolicyError as exc:
+            raise _error("upstream_unavailable", 503) from exc
+        if pinned is not None:
+            pinned.pin(remote)
+        try:
+            async with (
+                httpx.AsyncClient(
+                    transport=self.transport or pinned,
+                    headers=COBALT_HEADERS,
+                    trust_env=False,
+                    follow_redirects=False,
+                    timeout=settings.facebook_read_timeout_seconds,
+                ) as client,
+                client.stream("GET", url) as response,
+            ):
+                # Public surfaces currently return 200 directly. Redirects
+                # are refused, not followed with credentials or a broad policy.
+                if (
+                    response.status_code != 200
+                    or content_type(response.headers.get("content-type", "")) != mime
+                ):
+                    raise _error("provider_response_changed", 502)
+                return (await read_limited(response, settings.facebook_max_metadata_bytes)).decode(
+                    "utf-8"
+                )
+        except (httpx.HTTPError, EgressResponseTooLarge, UnicodeDecodeError) as exc:
+            raise _error("upstream_unavailable", 503) from exc
+
+    async def _fetch_document(self, canonical_url: str) -> "FacebookPage":
         url = canonical_url
         timeout = httpx.Timeout(
             settings.facebook_read_timeout_seconds,
@@ -70,7 +157,18 @@ class FacebookMetadataClient:
                             location = response.headers.get("location")
                             if not location:
                                 raise _error("invalid_redirect", 502)
-                            url = urljoin(url, location)
+                            target = urljoin(url, location)
+                            await _validate(target)
+                            if urlsplit(target).path.rstrip("/") == "/login":
+                                # A login redirect does not prove the content is
+                                # private. Retain the last validated content URL
+                                # so its official post embed can be consulted.
+                                return FacebookPage(url=url, html="")
+                            try:
+                                classify_url(target)
+                            except UrlValidationError as exc:
+                                raise _error("disallowed_redirect", 502) from exc
+                            url = target
                             continue
                         if response.status_code == 429:
                             raise _error("rate_limited_upstream", 503)
@@ -95,10 +193,132 @@ class FacebookMetadataClient:
                 except httpx.NetworkError as exc:
                     raise _error("upstream_unavailable", 503) from exc
                 try:
-                    return body.decode("utf-8")
+                    return FacebookPage(url=url, html=body.decode("utf-8"))
                 except UnicodeDecodeError as exc:
                     raise _error("provider_response_changed", 502) from exc
         raise _error("too_many_redirects", 502)
+
+    async def probe_mp4(self, url: str) -> dict[str, int | bool] | None:
+        """Read a bounded MP4 prefix to obtain rendition-local track metadata.
+
+        This uses the same pinned HTTPS policy as page retrieval and never
+        downloads a media object or exposes its signed URL. A missing faststart
+        moov atom is intentionally treated as unknown rather than guessed.
+        """
+        try:
+            remote = await resolve_allowed_url(url, ASSET_HOSTS)
+        except EgressPolicyError:
+            return None
+        transport = PinnedAsyncHTTPTransport() if self.transport is None else None
+        if transport is not None:
+            transport.pin(remote)
+        timeout = httpx.Timeout(
+            settings.facebook_read_timeout_seconds,
+            connect=settings.facebook_connect_timeout_seconds,
+        )
+        try:
+            async with (
+                httpx.AsyncClient(
+                    timeout=timeout,
+                    trust_env=False,
+                    follow_redirects=False,
+                    transport=self.transport or transport,
+                ) as client,
+                client.stream(
+                    "GET", url, headers={"Range": "bytes=0-524287", "Accept": "video/mp4"}
+                ) as response,
+            ):
+                if (
+                    response.status_code not in {200, 206}
+                    or content_type(response.headers.get("content-type", "")) != "video/mp4"
+                ):
+                    return None
+                byte_range = None
+                if response.status_code == 206:
+                    byte_range = re.fullmatch(
+                        r"bytes 0-([0-9]+)/([0-9]+)", response.headers.get("content-range", "")
+                    )
+                    if byte_range is None or not 0 <= int(byte_range[1]) < min(
+                        int(byte_range[2]), 524_288
+                    ):
+                        return None
+                body = await read_limited(response, 524_288)
+                if byte_range is not None and len(body) != int(byte_range[1]) + 1:
+                    return None
+        except (httpx.TimeoutException, httpx.NetworkError, EgressResponseTooLarge):
+            return None
+        return _mp4_tracks(body)
+
+
+@dataclass(frozen=True, slots=True)
+class FacebookPage:
+    """One fresh, in-memory anonymous Facebook document session.
+
+    HTTPX retains only Set-Cookie values issued while walking the validated
+    Facebook page redirect chain. The client is closed immediately afterwards;
+    neither application request cookies nor CDN cookies are forwarded or stored.
+    """
+
+    url: str
+    html: str
+
+
+def _mp4_tracks(data: bytes) -> dict[str, int | bool] | None:
+    moov = next((payload for name, payload in _boxes(data) if name == b"moov"), None)
+    if moov is None:
+        return None
+    video_width = video_height = None
+    has_audio = False
+    for name, track in _boxes(moov):
+        if name != b"trak":
+            continue
+        handler = _track_handler(track)
+        if handler == b"soun":
+            has_audio = True
+        elif handler == b"vide":
+            dimensions = _track_dimensions(track)
+            if dimensions is not None:
+                video_width, video_height = dimensions
+    if video_width is None or video_height is None:
+        return None
+    return {"width": video_width, "height": video_height, "has_audio": has_audio}
+
+
+def _boxes(data: bytes):
+    offset = 0
+    while offset + 8 <= len(data):
+        size = unpack(">I", data[offset : offset + 4])[0]
+        name = data[offset + 4 : offset + 8]
+        header = 8
+        if size == 1:
+            if offset + 16 > len(data):
+                return
+            size = unpack(">Q", data[offset + 8 : offset + 16])[0]
+            header = 16
+        if size < header or offset + size > len(data):
+            return
+        yield name, data[offset + header : offset + size]
+        offset += size
+
+
+def _track_handler(track: bytes) -> bytes | None:
+    for name, payload in _boxes(track):
+        if name != b"mdia":
+            continue
+        for child, value in _boxes(payload):
+            if child == b"hdlr" and len(value) >= 12:
+                return value[8:12]
+    return None
+
+
+def _track_dimensions(track: bytes) -> tuple[int, int] | None:
+    for name, payload in _boxes(track):
+        if name == b"tkhd" and len(payload) >= 8:
+            width = unpack(">I", payload[-8:-4])[0] >> 16
+            height = unpack(">I", payload[-4:])[0] >> 16
+            if width > 0 and height > 0:
+                return width, height
+    return None
 
 
 async def _validate(url: str) -> ResolvedRemote:

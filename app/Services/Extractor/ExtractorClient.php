@@ -311,7 +311,7 @@ final class ExtractorClient
             ($platform === MediaPlatform::LinkedIn && $maturity !== 'stable')
             || ($platform === MediaPlatform::Pinterest && $maturity !== 'available')
             || ($platform === MediaPlatform::TikTok && $maturity !== 'beta')
-            || ($platform === MediaPlatform::Facebook && $maturity !== 'beta')
+            || ($platform === MediaPlatform::Facebook && $maturity !== 'available')
             || (! in_array($platform, [MediaPlatform::LinkedIn, MediaPlatform::Pinterest, MediaPlatform::TikTok, MediaPlatform::Facebook], true) && $maturity !== null)
             || ! is_array($warnings)
             || count($warnings) > 5
@@ -680,6 +680,9 @@ final class ExtractorClient
             'quality_label' => $this->nullableString($variant['quality_label'] ?? null, 40),
             'filesize' => $this->nullablePositiveInt($variant['filesize'] ?? null),
             'is_preferred' => $variant['is_preferred'],
+            ...($platform === MediaPlatform::Facebook ? [
+                'audio_url' => $this->safeAssetUrl($variant['audio_url'] ?? null, $platform, $requestId, true),
+            ] : []),
         ];
     }
 
@@ -836,11 +839,14 @@ final class ExtractorClient
         $parts = parse_url($url);
         $path = (string) ($parts['path'] ?? '');
         $query = (string) ($parts['query'] ?? '');
+        $videoIdQuery = preg_match('/^v=[0-9]{10,30}$/', $query) === 1;
+        $storyQuery = preg_match('/^story_fbid=[0-9]{10,30}&id=[0-9]{10,30}$/', $query) === 1;
         $validPath = $variant === 'reel'
             ? preg_match('#^/reel/[0-9]{10,30}$#', $path) === 1 && $query === ''
             : ($variant === 'video' && (
                 (preg_match('#^/[A-Za-z0-9._-]{1,100}/videos/(?:[A-Za-z0-9._-]{1,160}/)?[0-9]{10,30}/$#', $path) === 1 && $query === '')
-                || (in_array($path, ['/watch', '/watch/'], true) && preg_match('/^v=[0-9]{10,30}$/', $query) === 1)
+                || (in_array($path, ['/watch', '/watch/', '/video.php'], true) && $videoIdQuery)
+                || ($path === '/story.php' && $storyQuery)
             ));
 
         return filter_var($url, FILTER_VALIDATE_URL) !== false
@@ -883,7 +889,7 @@ final class ExtractorClient
                                 : ($platform === MediaPlatform::TikTok
                                     ? in_array($host, ['v16-webapp-prime.tiktok.com', 'v19-webapp-prime.tiktok.com', 'p16-common-sign.tiktokcdn-eu.com'], true)
                                     : ($platform === MediaPlatform::Facebook
-                                        ? str_ends_with($host, '.xx.fbcdn.net') && $host !== 'xx.fbcdn.net'
+                                        ? (str_ends_with($host, '.xx.fbcdn.net') || str_ends_with($host, '.fna.fbcdn.net'))
                                         : in_array($host, ['i.ytimg.com', 'img.youtube.com'], true))))
                     )
             );

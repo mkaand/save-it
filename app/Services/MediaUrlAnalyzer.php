@@ -483,15 +483,22 @@ final class MediaUrlAnalyzer
                             'animated_gif' => 'Animated GIF video',
                             default => 'Video',
                         });
+                $composite = $recognition->platform === MediaPlatform::Facebook && is_string($source['audio_url'] ?? null);
+                $mode = $composite ? 'facebook_merge' : 'proxy';
+                $filename = $this->downloadFilename($title, $mime, $variantIndex + 1);
                 $token = $this->downloads->issue([
                     'version' => 1,
-                    'mode' => 'proxy',
+                    'mode' => $mode,
                     'provider' => $recognition->platform->value,
                     ...$this->providerRequestContext($recognition),
                     'asset_id' => $asset['id'],
                     'upstream_url' => $url,
                     'mime_type' => $mime,
-                    'filename' => $this->downloadFilename($title, $mime, $variantIndex + 1),
+                    'filename' => $filename,
+                    ...($composite ? ['sources' => [
+                        ['provider' => 'facebook', 'upstream_url' => $url, 'mime_type' => 'video/mp4'],
+                        ['provider' => 'facebook', 'upstream_url' => $source['audio_url'], 'mime_type' => 'audio/mp4'],
+                    ]] : []),
                     'expected_size' => is_int($source['filesize'] ?? null)
                         ? $source['filesize']
                         : null,
@@ -499,15 +506,13 @@ final class MediaUrlAnalyzer
                 $outputs[] = [
                     'id' => $asset['id'].'-'.($variantIndex + 1),
                     'label' => $label,
-                    'detail' => $this->assetDetail($asset, $source),
+                    'detail' => $composite ? ($source['quality_label'].' · video + audio preparation') : $this->assetDetail($asset, $source),
                     'available' => true,
                     'asset_id' => $asset['id'],
                     'asset_order' => $asset['order'],
                     'asset_type' => $asset['type'],
                     'mime_type' => $mime,
-                    'delivery' => 'proxy',
-                    'download_url' => route('api.downloads.show', ['token' => $token], false),
-                    'expires_in' => (int) config('services.downloads.token_ttl_seconds'),
+                    ...$this->delivery($mode, $token),
                     'share_size_bytes' => is_int($source['filesize'] ?? null)
                         ? $source['filesize']
                         : null,
@@ -726,7 +731,7 @@ final class MediaUrlAnalyzer
     /** @return array<string, mixed> */
     private function delivery(string $mode, string $token): array
     {
-        if (in_array($mode, ['youtube_merge', 'youtube_mp3', 'zip'], true)) {
+        if (in_array($mode, ['youtube_merge', 'youtube_mp3', 'zip', 'facebook_merge'], true)) {
             return [
                 'delivery' => 'job',
                 'job_url' => route('api.download-jobs.store', absolute: false),

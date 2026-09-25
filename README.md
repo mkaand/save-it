@@ -41,7 +41,7 @@ Platform labels describe the current implementation:
 - LinkedIn: public post analysis and progressive public-media delivery available
 - Pinterest: anonymous public Pin image/video extraction and secure delivery available in Beta
 - TikTok: anonymous public video extraction and secure delivery available in Beta; photo posts are not supported
-- Facebook: URL recognition; extraction is planned
+- Facebook: anonymous public video and Reel extraction with secure delivery available
 
 ## Analyze endpoint
 
@@ -105,9 +105,11 @@ HTML metadata, and emits only allowlisted `*.licdn.com` asset references. The Ti
 adapter accepts canonical public video URLs and safely resolved `vm.tiktok.com` or
 `vt.tiktok.com` links, parses only the exact canonical hydration script, and emits
 only the observed direct MP4/poster hosts. TikTok photo posts remain unsupported.
-Facebook remains a `not_implemented` stub. The YouTube adapter accepts only canonical
-video and Shorts URLs and uses the pinned yt-dlp Python library API in metadata-only
-mode.
+The Facebook adapter accepts public video, Reel, story/post, share, and `fb.watch`
+URLs, resolves only Facebook's public document or official embed/oEmbed surfaces, and
+emits only verified Facebook CDN media references. The YouTube adapter accepts only
+canonical video and Shorts URLs and uses the pinned yt-dlp Python library API in
+metadata-only mode.
 
 The Pinterest adapter accepts only public numeric `/pin/<id>/` URLs and safely
 resolved `pin.it` links. It uses Pinterest's bounded anonymous `PinResource` JSON

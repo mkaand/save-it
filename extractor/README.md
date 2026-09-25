@@ -17,8 +17,9 @@ The X and Instagram adapters return normalized metadata and ordered media assets
 The YouTube adapter returns normalized video metadata, validated thumbnails, safe
 format identifiers and ordered video/audio options. Laravel turns those identifiers
 into short-lived direct, merge, M4A, and MP3 delivery plans.
-TikTok and Facebook return `501 provider_not_implemented`, which Laravel maps
-to the existing public preview.
+TikTok supports anonymous public video extraction. Facebook supports anonymous public
+video and Reel extraction, including public story/post, share, and `fb.watch` URL
+resolution. Both return only validated media references; Laravel performs delivery.
 
 The X adapter builds its own request to the public structured metadata host. It uses
 verified TLS, ignores environment proxies, validates public DNS results and redirects,

@@ -112,7 +112,7 @@ def test_linkedin_success_exposes_stable_contract(monkeypatch: pytest.MonkeyPatc
     assert "traceback" not in response.text.lower()
 
 
-def test_facebook_success_exposes_beta_video_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_facebook_success_exposes_available_video_contract(monkeypatch: pytest.MonkeyPatch) -> None:
     result = ExtractResult(
         request_id="contract-test-facebook",
         provider=Provider.FACEBOOK,
@@ -124,7 +124,7 @@ def test_facebook_success_exposes_beta_video_contract(monkeypatch: pytest.Monkey
         metadata={"post_id": "588631943886661", "media_count": 1},
         assets=[{"id": "asset-1", "type": "video", "order": 1}],
         capabilities=["metadata", "media_assets", "video_variants"],
-        maturity="beta",
+        maturity="available",
         warnings=["Public availability depends on Facebook's anonymous Relay response."],
     )
     monkeypatch.setattr(main.service, "extract", AsyncMock(return_value=result))
@@ -141,7 +141,7 @@ def test_facebook_success_exposes_beta_video_contract(monkeypatch: pytest.Monkey
     data = response.json()["data"]
     assert data["provider"] == "facebook"
     assert data["provider_variant"] == "reel"
-    assert data["provider_maturity"] == "beta"
+    assert data["provider_maturity"] == "available"
     assert data["normalized_url"] == "https://www.facebook.com/reel/588631943886661"
     assert data["assets"] == [{"id": "asset-1", "type": "video", "order": 1}]
 

@@ -241,10 +241,10 @@
                         <div><h3>X</h3><p>Media extraction</p></div>
                         <span class="status-badge status-mvp">Available</span>
                     </article>
-                    <article class="platform-card is-primary" data-facebook-extractor-beta>
+                    <article class="platform-card is-primary" data-facebook-extractor-available>
                         <span class="platform-icon-slot" data-platform-icon="facebook" aria-hidden="true">FB</span>
                         <div><h3>Facebook</h3><p>Public video and Reel media</p></div>
-                        <span class="status-badge status-mvp">Beta</span>
+                        <span class="status-badge status-mvp">Available</span>
                     </article>
                     <article class="platform-card is-primary">
                         <span class="platform-icon-slot" data-platform-icon="pinterest" aria-hidden="true">P</span>

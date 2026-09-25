@@ -14,6 +14,15 @@ VIDEO_ID = "588631943886661"
 HD = "https://video-ams2-1.xx.fbcdn.net/v/t42/example-hd.mp4?oe=redacted"
 SD = "https://video-ams2-1.xx.fbcdn.net/v/t42/example-sd.mp4?oe=redacted"
 POSTER = "https://scontent-ams2-1.xx.fbcdn.net/v/t39/example.jpg?oh=redacted"
+DASH = """<MPD xmlns=\"urn:mpeg:dash:schema:mpd:2011\"><Period>
+<AdaptationSet mimeType=\"video/mp4\">
+<Representation codecs=\"avc1.64001f\" width=\"720\" height=\"1280\" bandwidth=\"3000000\">
+<BaseURL>https://video.fist8-1.fna.fbcdn.net/v/t42/example-hd.mp4?oe=redacted</BaseURL>
+</Representation></AdaptationSet>
+<AdaptationSet mimeType=\"audio/mp4\"><Representation codecs=\"mp4a.40.5\" bandwidth=\"64000\">
+<BaseURL>https://video.fist8-1.fna.fbcdn.net/v/t42/example-audio.mp4?oe=redacted</BaseURL>
+</Representation></AdaptationSet>
+</Period></MPD>"""
 
 
 def page(
@@ -36,6 +45,7 @@ def page(
             "browser_native_sd_url": SD,
             # Equivalent signed identities must not create duplicate output rows.
             "playable_url_quality_hd": HD + "&signature=other",
+            "dash_manifest_xml_string": DASH,
         }
         if include_media
         else {},
@@ -75,7 +85,7 @@ def test_facebook_video_and_reel_urls_normalize_without_tracking() -> None:
         "https://www.facebook.com/marketplace/item/123",
         "https://www.facebook.com/photo.php?fbid=588631943886661",
         "https://www.facebook.com/reel/not-an-id",
-        "https://fb.watch/example",
+        "https://fb.watch/x",
     ],
 )
 def test_non_media_and_unproven_short_urls_are_rejected(url: str) -> None:
@@ -90,8 +100,28 @@ def test_relay_parser_extracts_identity_bound_cobalt_native_fields() -> None:
     assert metadata["post_id"] == VIDEO_ID
     assert metadata["thumbnail_url"] == POSTER
     assert assets[0]["url"] == HD
-    assert len(assets[0]["variants"]) == 2
-    assert assets[0]["variants"][0]["quality_label"] == "HD · 1920×1080"
+    assert assets[0]["variants"][0]["quality_label"] == "HD · 720×1280 · 3.0 Mbps"
+    assert all("1920×1080" not in item["quality_label"] for item in assets[0]["variants"])
+
+
+def test_dash_parser_accepts_audible_h264_and_fna_cdn_without_parent_dimension_leakage() -> None:
+    _, assets, _ = parse_facebook_video(page(), VIDEO_ID)
+    variant = assets[0]["variants"][0]
+    assert variant["width"] == 720
+    assert variant["height"] == 1280
+    assert variant["bitrate"] == 3_000_000
+
+
+def test_facebook_story_share_and_alias_urls_are_accepted_without_tracking() -> None:
+    cases = {
+        "https://m.facebook.com/reels/588631943886661/?_rdr": "https://www.facebook.com/reel/588631943886661",
+        "https://web.facebook.com/video.php?v=588631943886661&ref=x": "https://www.facebook.com/video.php?v=588631943886661",
+        "https://www.facebook.com/story.php?story_fbid=100000000000001&id=100000000000002&hpir=1": "https://www.facebook.com/story.php?story_fbid=100000000000001&id=100000000000002",
+        "https://www.facebook.com/share/r/SyntheticShare/?mibextid=x": "https://www.facebook.com/share/r/SyntheticShare",
+        "https://fb.watch/SyntheticLink/?fs=e": "https://fb.watch/SyntheticLink",
+    }
+    for raw, expected in cases.items():
+        assert classify_url(raw).normalized_url == expected
 
 
 def test_reel_parser_uses_known_playback_video_path() -> None:
@@ -121,7 +151,7 @@ class FakeClient:
         return page(reel=True)
 
 
-def test_adapter_returns_beta_ready_contract_for_reel() -> None:
+def test_adapter_returns_available_ready_contract_for_reel() -> None:
     result = asyncio.run(
         FacebookProviderAdapter(client=FakeClient()).extract(
             classify_url(f"https://www.facebook.com/reel/{VIDEO_ID}"), "facebook-test"
@@ -130,5 +160,5 @@ def test_adapter_returns_beta_ready_contract_for_reel() -> None:
     assert result.provider is Provider.FACEBOOK
     assert result.variant == "reel"
     assert result.status == "ready"
-    assert result.maturity == "beta"
+    assert result.maturity == "available"
     assert result.capabilities == ["metadata", "media_assets", "video_variants"]
