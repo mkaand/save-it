@@ -46,6 +46,7 @@ final class PrepareDownloadJob implements ShouldQueue
             $token = $tokens->issue([
                 'version' => 1,
                 'mode' => 'local_file',
+                ...(($this->plan['mode'] ?? null) === 'facebook_merge' ? ['provider' => 'facebook'] : []),
                 ...$result,
             ]);
             $jobs->update($this->jobId, [

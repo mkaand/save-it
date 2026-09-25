@@ -15,8 +15,13 @@ HD = "https://video-ams2-1.xx.fbcdn.net/v/t42/example-hd.mp4?oe=redacted"
 SD = "https://video-ams2-1.xx.fbcdn.net/v/t42/example-sd.mp4?oe=redacted"
 POSTER = "https://scontent-ams2-1.xx.fbcdn.net/v/t39/example.jpg?oh=redacted"
 DASH = """<MPD xmlns=\"urn:mpeg:dash:schema:mpd:2011\"><Period>
-<AdaptationSet mimeType=\"video/mp4\"><Representation codecs=\"avc1.64001f\" width=\"720\" height=\"1280\" bandwidth=\"3000000\"><BaseURL>https://video.fist8-1.fna.fbcdn.net/v/t42/example-hd.mp4?oe=redacted</BaseURL></Representation></AdaptationSet>
-<AdaptationSet mimeType=\"audio/mp4\"><Representation codecs=\"mp4a.40.5\" bandwidth=\"64000\"><BaseURL>https://video.fist8-1.fna.fbcdn.net/v/t42/example-audio.mp4?oe=redacted</BaseURL></Representation></AdaptationSet>
+<AdaptationSet mimeType=\"video/mp4\">
+<Representation codecs=\"avc1.64001f\" width=\"720\" height=\"1280\" bandwidth=\"3000000\">
+<BaseURL>https://video.fist8-1.fna.fbcdn.net/v/t42/example-hd.mp4?oe=redacted</BaseURL>
+</Representation></AdaptationSet>
+<AdaptationSet mimeType=\"audio/mp4\"><Representation codecs=\"mp4a.40.5\" bandwidth=\"64000\">
+<BaseURL>https://video.fist8-1.fna.fbcdn.net/v/t42/example-audio.mp4?oe=redacted</BaseURL>
+</Representation></AdaptationSet>
 </Period></MPD>"""
 
 
@@ -94,8 +99,8 @@ def test_relay_parser_extracts_identity_bound_cobalt_native_fields() -> None:
     assert media_type == "video"
     assert metadata["post_id"] == VIDEO_ID
     assert metadata["thumbnail_url"] == POSTER
-    assert assets[0]["url"] == "https://video.fist8-1.fna.fbcdn.net/v/t42/example-hd.mp4?oe=redacted"
-    assert assets[0]["variants"][0]["quality_label"] == "720×1280 · 3.0 Mbps"
+    assert assets[0]["url"] == HD
+    assert assets[0]["variants"][0]["quality_label"] == "HD · 720×1280 · 3.0 Mbps"
     assert all("1920×1080" not in item["quality_label"] for item in assets[0]["variants"])
 
 
@@ -146,7 +151,7 @@ class FakeClient:
         return page(reel=True)
 
 
-def test_adapter_returns_beta_ready_contract_for_reel() -> None:
+def test_adapter_returns_available_ready_contract_for_reel() -> None:
     result = asyncio.run(
         FacebookProviderAdapter(client=FakeClient()).extract(
             classify_url(f"https://www.facebook.com/reel/{VIDEO_ID}"), "facebook-test"
@@ -155,5 +160,5 @@ def test_adapter_returns_beta_ready_contract_for_reel() -> None:
     assert result.provider is Provider.FACEBOOK
     assert result.variant == "reel"
     assert result.status == "ready"
-    assert result.maturity == "beta"
+    assert result.maturity == "available"
     assert result.capabilities == ["metadata", "media_assets", "video_variants"]

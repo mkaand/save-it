@@ -58,7 +58,10 @@ final class DownloadController extends Controller
                             'X-Accel-Buffering' => 'no',
                         ],
                     )
-                    ->deleteFileAfterSend(true);
+                    // Facebook composites must survive Safari's multiple Range
+                    // reads and a subsequent Share preparation. Existing bounded
+                    // runtime cleanup expires the private job directory.
+                    ->deleteFileAfterSend($provider !== 'facebook');
             } elseif (($asset['mode'] ?? null) === 'youtube_direct') {
                 $asset = $youtube->resolve($asset);
             } elseif (($asset['mode'] ?? null) !== 'proxy') {

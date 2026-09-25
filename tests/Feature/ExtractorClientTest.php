@@ -2,10 +2,12 @@
 
 namespace Tests\Feature;
 
+use App\Services\Downloads\DownloadAssetStore;
 use App\Services\Downloads\UpstreamUrlPolicy;
 use App\Services\Previews\RecentPreviewStore;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
 use Mockery;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -566,7 +568,7 @@ class ExtractorClientTest extends TestCase
         ])->assertOk()
             ->assertJsonPath('data.platform', 'facebook')
             ->assertJsonPath('data.platform_label', 'Facebook')
-            ->assertJsonPath('data.provider_maturity', 'beta')
+            ->assertJsonPath('data.provider_maturity', 'available')
             ->assertJsonPath('data.media_type', 'video')
             ->assertJsonPath('data.url', 'https://www.facebook.com/reel/588631943886661')
             ->assertJsonPath('data.outputs.0.label', '1920×1080')
@@ -574,6 +576,33 @@ class ExtractorClientTest extends TestCase
 
         $this->assertStringNotContainsString('fbcdn.net', $response->getContent());
         $this->assertStringNotContainsString('signature=', $response->getContent());
+    }
+
+    public function test_facebook_audio_source_stays_private_and_creates_common_preparation_job(): void
+    {
+        $policy = Mockery::mock(UpstreamUrlPolicy::class);
+        $policy->shouldReceive('validate')->andReturnUsing(static fn (string $url): string => $url);
+        $this->app->instance(UpstreamUrlPolicy::class, $policy);
+        Http::fake(function (Request $request) {
+            if ($request->method() === 'POST') {
+                $payload = $this->facebookSuccessResponse($request->data()['request_id']);
+                $payload['data']['assets'][0]['variants'][0]['audio_url'] = 'https://video.edge.fna.fbcdn.net/audio.mp4?signature=private-audio';
+
+                return Http::response($payload);
+            }
+
+            return Http::response('image', 200, ['Content-Type' => 'image/jpeg']);
+        });
+        $response = $this->postJson('/api/analyze', ['url' => 'https://www.facebook.com/share/r/SyntheticShare/'])->assertOk()
+            ->assertJsonPath('data.outputs.0.delivery', 'job')
+            ->assertJsonPath('data.outputs.1.delivery', 'proxy');
+        $this->assertStringNotContainsString('private-audio', $response->getContent());
+        $this->assertStringNotContainsString('fbcdn.net', $response->getContent());
+        $plan = app(DownloadAssetStore::class)->resolve($response->json('data.outputs.0.job_token'));
+        $this->assertSame('facebook_merge', $plan['mode']);
+        $this->assertSame('audio/mp4', $plan['sources'][1]['mime_type']);
+        Bus::fake();
+        $this->postJson('/api/download-jobs', ['token' => $response->json('data.outputs.0.job_token')])->assertStatus(202);
     }
 
     public function test_linkedin_extraction_accepts_a_long_percent_encoded_canonical_post_url(): void
@@ -1010,7 +1039,7 @@ class ExtractorClientTest extends TestCase
                 'media_type' => 'video',
                 'normalized_url' => 'https://www.facebook.com/reel/588631943886661',
                 'status' => 'ready',
-                'provider_maturity' => 'beta',
+                'provider_maturity' => 'available',
                 'warnings' => ['Public availability depends on Facebook\'s anonymous Relay response.'],
                 'metadata' => [
                     'post_id' => '588631943886661',

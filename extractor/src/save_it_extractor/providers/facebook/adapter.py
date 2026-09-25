@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import dataclass, field
 from urllib.parse import parse_qs, urlsplit
 
@@ -21,7 +22,16 @@ class FacebookProviderAdapter:
                 422,
                 {"provider": "facebook"},
             )
-        page = await self.client.fetch_page(context.normalized_url)
+        source = context.source_url or context.normalized_url
+        # Keep shortlink query state until Facebook resolves it; only canonical
+        # output is stripped. Classify again before using the original source.
+        if classify_url(source).normalized_url != context.normalized_url:
+            raise ProviderError(
+                "unsupported_url", "Invalid Facebook content URL.", 422, {"provider": "facebook"}
+            )
+        page = await self.client.fetch_page(
+            source if source.startswith("https://") else context.normalized_url
+        )
         # Test clients may intentionally provide only HTML. Production clients
         # retain the validated terminal page URL after a bounded redirect chain.
         page_url = page.url if hasattr(page, "url") else context.normalized_url
@@ -29,7 +39,12 @@ class FacebookProviderAdapter:
         try:
             resolved = classify_url(page_url)
         except UrlValidationError as exc:
-            raise ProviderError("provider_response_changed", "Facebook returned unsupported public metadata.", 502, {"provider": "facebook"}) from exc
+            raise ProviderError(
+                "provider_response_changed",
+                "Facebook returned unsupported public metadata.",
+                502,
+                {"provider": "facebook"},
+            ) from exc
         video_id, story_id = _identities(resolved.normalized_url)
         metadata, assets, media_type = parse_facebook_video(
             html, expected_video_id=video_id, story_id=story_id
@@ -46,24 +61,38 @@ class FacebookProviderAdapter:
             metadata=metadata,
             assets=assets,
             capabilities=["metadata", "media_assets", "video_variants"],
-            maturity="beta",
+            maturity="available",
             warnings=["Public availability depends on Facebook's anonymous Relay response."],
         )
 
     async def _enrich_native_renditions(self, assets: list[dict]) -> None:
         """Use bounded MP4 headers, not parent post dimensions, for labels."""
         if not hasattr(self.client, "probe_mp4"):
+            for asset in assets:
+                asset.pop("_facebook_audio", None)
             return
         for asset in assets:
+            audio = asset.pop("_facebook_audio", None)
             variants = asset.get("variants")
             if not isinstance(variants, list):
                 continue
-            for variant in variants:
+            probes = await asyncio.gather(
+                *(self.client.probe_mp4(variant["url"]) for variant in variants)
+            )
+            for variant, info in zip(variants, probes, strict=True):
                 if not isinstance(variant, dict) or not isinstance(variant.get("url"), str):
                     continue
-                info = await self.client.probe_mp4(variant["url"])
                 if info is None:
+                    if audio is not None:
+                        raise ProviderError(
+                            "provider_response_changed",
+                            "Facebook rendition audio could not be verified safely.",
+                            502,
+                            {"provider": "facebook"},
+                        )
                     continue
+                if info.get("has_audio") is False and audio is not None:
+                    variant["audio_url"] = audio
                 width, height = info.get("width"), info.get("height")
                 if not isinstance(width, int) or not isinstance(height, int):
                     continue
@@ -76,6 +105,17 @@ class FacebookProviderAdapter:
                 if isinstance(bitrate, int) and bitrate > 0:
                     pieces.append(f"{bitrate / 1_000_000:.1f} Mbps")
                 variant["quality_label"] = " · ".join(piece for piece in pieces if piece)
+            variants.sort(
+                key=lambda item: (
+                    -((item.get("width") or 0) * (item.get("height") or 0)),
+                    -(item.get("bitrate") or 0),
+                    item["url"].split("?", 1)[0],
+                )
+            )
+            for index, variant in enumerate(variants):
+                variant["is_preferred"] = index == 0
+            asset["url"] = variants[0]["url"]
+            asset["width"], asset["height"] = variants[0]["width"], variants[0]["height"]
 
 
 def _identities(url: str) -> tuple[str | None, str | None]:
@@ -84,7 +124,7 @@ def _identities(url: str) -> tuple[str | None, str | None]:
     if parsed.path == "/story.php":
         story = values.get("story_fbid", [])
         return None, story[0] if len(story) == 1 else None
-    if parsed.path in {"/watch", "/video.php"}:
+    if parsed.path in {"/watch", "/watch/", "/video.php"}:
         values = values.get("v", [])
         return (values[0] if len(values) == 1 else None), None
     return parsed.path.rstrip("/").split("/")[-1], None

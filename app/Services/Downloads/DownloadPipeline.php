@@ -25,6 +25,7 @@ final class DownloadPipeline
         try {
             return match ($plan['mode'] ?? null) {
                 'youtube_merge' => $this->merge($plan, $directory, $progress),
+                'facebook_merge' => $this->merge($plan, $directory, $progress),
                 'youtube_mp3' => $this->mp3($plan, $directory, $progress),
                 'zip' => $this->zip($plan, $directory, $progress),
                 default => throw new DownloadException(
@@ -43,13 +44,18 @@ final class DownloadPipeline
     private function merge(array $plan, string $directory, callable $progress): array
     {
         $progress('Downloading streams', 15);
-        $video = $this->youtube->resolve($this->source($plan, 0));
-        $audio = $this->youtube->resolve($this->source($plan, 1));
+        $facebook = ($plan['mode'] ?? null) === 'facebook_merge';
+        $video = $facebook ? $this->source($plan, 0) : $this->youtube->resolve($this->source($plan, 0));
+        $audio = $facebook ? $this->source($plan, 1) : $this->youtube->resolve($this->source($plan, 1));
+        if ($facebook && (($video['provider'] ?? null) !== 'facebook' || ($audio['provider'] ?? null) !== 'facebook'
+            || ($video['mime_type'] ?? null) !== 'video/mp4' || ($audio['mime_type'] ?? null) !== 'audio/mp4')) {
+            throw new DownloadException('invalid_download_token', 410, 'The download plan is invalid.');
+        }
         $videoPath = "{$directory}/video.input";
         $audioPath = "{$directory}/audio.input";
         $limit = (int) config('services.downloads.max_file_bytes');
-        $this->downloader->download($video, $videoPath, $limit);
-        $this->downloader->download($audio, $audioPath, $limit);
+        $videoBytes = $this->downloader->download($video, $videoPath, $limit);
+        $this->downloader->download($audio, $audioPath, $facebook ? max(0, $limit - $videoBytes) : $limit);
 
         $progress('Merging', 70);
         $output = "{$directory}/output.mp4";
@@ -59,11 +65,18 @@ final class DownloadPipeline
             '-map', '0:v:0',
             '-map', '1:a:0',
             '-c', 'copy',
+            ...($facebook ? ['-map_metadata', '-1', '-map_chapters', '-1'] : []),
             '-movflags', '+faststart',
             '-threads', '2',
-            '-fs', (string) config('services.downloads.max_file_bytes'),
+            ...($facebook ? [] : ['-fs', (string) config('services.downloads.max_file_bytes')]),
             $output,
         ]);
+        if ($facebook) {
+            if (filesize($output) > $limit) {
+                throw new DownloadException('file_too_large', 413, 'The prepared media exceeds the size limit.');
+            }
+            File::delete([$videoPath, $audioPath]);
+        }
 
         return $this->result($output, $plan, 'video/mp4');
     }

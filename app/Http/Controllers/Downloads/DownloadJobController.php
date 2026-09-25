@@ -25,7 +25,7 @@ final class DownloadJobController extends Controller
 
         try {
             $plan = $tokens->consume($validated['token']);
-            if (! in_array($plan['mode'] ?? null, ['youtube_merge', 'youtube_mp3', 'zip'], true)) {
+            if (! in_array($plan['mode'] ?? null, ['youtube_merge', 'youtube_mp3', 'zip', 'facebook_merge'], true)) {
                 throw new DownloadException(
                     'invalid_download_token',
                     410,

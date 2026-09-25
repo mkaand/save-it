@@ -42,7 +42,8 @@ class FoundationTest extends TestCase
             ->assertSee('data-youtube-shorts-extractor-available', false)
             ->assertSee('data-instagram-extractor-available', false)
             ->assertSee('data-tiktok-extractor-beta', false)
-            ->assertSee('data-facebook-extractor-beta', false)
+            ->assertSee('data-facebook-extractor-available', false)
+            ->assertDontSee('data-facebook-extractor-beta', false)
             ->assertSee('<details class="privacy-details">', false)
             ->assertDontSee('Login')
             ->assertDontSee('Register');
