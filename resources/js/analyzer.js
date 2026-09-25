@@ -176,6 +176,7 @@ export function initAnalyzer() {
     const submitLabel = card.querySelector('[data-analyze-label]');
     const status = card.querySelector('[data-analyzer-status]');
     const error = card.querySelector('[data-url-error]');
+    const issueLink = card.querySelector('[data-issue-report-open]');
     const resultSection = document.querySelector('[data-result-section]');
     const resultPanel = document.querySelector('[data-result-panel]');
     const recentSection = document.querySelector('[data-recent-section]');
@@ -185,6 +186,8 @@ export function initAnalyzer() {
     let recentItems = readRecentFetches(storage);
     let clearTimer;
     let shareSessions = [];
+
+    initIssueReporting(input);
 
     function clearPreparedShares() {
         shareSessions.forEach((session) => session.release());
@@ -198,6 +201,7 @@ export function initAnalyzer() {
     function setError(message = '') {
         error.textContent = message;
         error.hidden = !message;
+        if (issueLink) issueLink.hidden = !message;
         input.setAttribute('aria-invalid', String(Boolean(message)));
     }
 
@@ -604,7 +608,14 @@ export function initAnalyzer() {
                     || payload?.error?.message
                     || payload?.message
                     || 'The URL could not be analyzed right now.';
-                throw new Error(message);
+                const issue = new Error(message);
+                issue.reportContext = {
+                    url: submittedUrl,
+                    provider: typeof payload?.error?.provider === 'string' ? payload.error.provider : '',
+                    errorCode: typeof payload?.error?.code === 'string' ? payload.error.code : '',
+                    requestId: typeof payload?.error?.request_id === 'string' ? payload.error.request_id : '',
+                };
+                throw issue;
             }
 
             renderResult(payload.data);
@@ -627,6 +638,9 @@ export function initAnalyzer() {
                 : requestError.message;
             setError(message);
             setStatus('', 'error');
+            window.dispatchEvent(new CustomEvent('save-it:issue-context', {
+                detail: requestError?.reportContext || { url: submittedUrl },
+            }));
             input.focus();
         } finally {
             resetTurnstileChallenge();
@@ -690,6 +704,47 @@ export function initAnalyzer() {
     });
 
     renderRecent();
+}
+
+function initIssueReporting(urlInput) {
+    const dialog = document.querySelector('[data-issue-report-dialog]');
+    const form = dialog?.querySelector('[data-issue-report-form]');
+    if (!dialog || !form) return;
+    const error = form.querySelector('[data-issue-report-error]');
+    const status = form.querySelector('[data-issue-report-status]');
+    let context = { url: '' };
+    const open = () => {
+        form.elements.submitted_url.value = context.url || urlInput?.value?.trim() || '';
+        form.elements.provider.value = context.provider || '';
+        form.elements.error_code.value = context.errorCode || '';
+        form.elements.request_id.value = context.requestId || '';
+        error.hidden = true;
+        status.hidden = true;
+        dialog.showModal();
+        form.elements.email.focus();
+    };
+    document.querySelectorAll('[data-issue-report-open]').forEach((button) => button.addEventListener('click', open));
+    document.querySelectorAll('[data-issue-report-close]').forEach((button) => button.addEventListener('click', () => dialog.close()));
+    window.addEventListener('save-it:issue-context', (event) => { context = event.detail || context; });
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        error.hidden = true;
+        status.hidden = true;
+        const response = await fetch('/api/issue-reports', {
+            method: 'POST',
+            headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '' },
+            body: JSON.stringify(Object.fromEntries(new FormData(form))),
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) {
+            error.textContent = payload?.error?.message || 'Your report could not be sent.';
+            error.hidden = false;
+            return;
+        }
+        status.textContent = payload?.data?.message || 'Thank you. Your report was sent.';
+        status.hidden = false;
+        form.reset();
+    });
 }
 
 export function initPage() {

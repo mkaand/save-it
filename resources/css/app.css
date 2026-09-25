@@ -1106,6 +1106,19 @@ summary:focus-visible {
     gap: 0.42rem;
 }
 
+.output-actions > .output-option,
+.output-actions > .output-share { min-height: 100%; }
+.output-actions .output-share { align-self: stretch; display: inline-flex; align-items: center; justify-content: center; }
+.footer-report-link { padding: 0; border: 0; background: none; color: inherit; cursor: pointer; text-decoration: underline; }
+.issue-report-dialog, .admin-dialog { width: min(34rem, calc(100% - 2rem)); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); color: var(--text); box-shadow: var(--shadow-lg); }
+.issue-report-dialog::backdrop, .admin-dialog::backdrop { background: rgba(11,18,32,.56); }
+.issue-report-dialog form, .admin-dialog form { display: grid; gap: .85rem; position: relative; }
+.issue-report-dialog label, .admin-dialog label { display: grid; gap: .35rem; font-weight: 700; }
+.issue-report-dialog input, .issue-report-dialog textarea, .admin-dialog input { width: 100%; }
+.dialog-close { position: absolute; right: 0; top: 0; border: 0; background: transparent; color: var(--text); font-size: 1.5rem; cursor: pointer; }
+.button-danger { background: var(--danger); color: #fff; border-color: var(--danger); }
+.danger-zone { border-top: 1px solid var(--border); padding-top: 1rem; }
+
 .x-asset-details {
     display: grid;
     gap: 0.15rem;

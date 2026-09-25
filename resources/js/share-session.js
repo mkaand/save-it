@@ -52,7 +52,10 @@ export function createShareSession(output, {
                 return Promise.resolve();
             }
 
-            return Promise.resolve(opening).then(() => {
+            // Some mobile Web Share implementations never settle while Photos
+            // accepts a file. Never leave the action permanently at Opening.
+            const recovery = new Promise((resolve) => window.setTimeout(resolve, 45_000));
+            return Promise.race([Promise.resolve(opening), recovery]).then(() => {
                 prepared = null;
                 phase = 'idle';
                 publish();

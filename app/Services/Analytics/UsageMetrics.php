@@ -4,6 +4,7 @@ namespace App\Services\Analytics;
 
 use App\Models\UsageMetricBucket;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 
 final class UsageMetrics
@@ -37,6 +38,23 @@ final class UsageMetrics
         $success = $rows->where('successful', true)->sum('count');
 
         return ['rows' => $rows, 'total' => $total, 'success' => $success, 'failed' => $total - $success];
+    }
+
+    /**
+     * Delete only privacy-first aggregate telemetry. Configuration, reports,
+     * queues and application-managed media are deliberately outside this scope.
+     */
+    public function reset(): void
+    {
+        try {
+            if (Schema::hasTable('usage_metric_buckets')) {
+                UsageMetricBucket::query()->delete();
+            }
+            Log::info('admin_analytics_reset');
+        } catch (\Throwable $exception) {
+            Log::warning('admin_analytics_reset_failed', ['exception' => $exception::class]);
+            throw $exception;
+        }
     }
 
     private function safe(string $value, int $limit): string

@@ -332,7 +332,7 @@ APP_NAME="Save It"
 APP_ENV=production
 APP_DEBUG=false
 UMAMI_ENABLED=true
-UMAMI_SCRIPT_URL=https://stats.allmy.win/script.js
+UMAMI_SCRIPT_URL=https://analytics.example.com/script.js
 UMAMI_WEBSITE_ID=your-untracked-website-id
 ```
 
