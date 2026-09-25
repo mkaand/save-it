@@ -4,6 +4,8 @@ namespace App\Services\Analytics;
 
 use App\Models\UsageMetricBucket;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 
 final class UsageMetrics
@@ -37,6 +39,19 @@ final class UsageMetrics
         $success = $rows->where('successful', true)->sum('count');
 
         return ['rows' => $rows, 'total' => $total, 'success' => $success, 'failed' => $total - $success];
+    }
+
+    public function reset(): void
+    {
+        if (! Schema::hasTable('usage_metric_buckets')) {
+            return;
+        }
+
+        DB::transaction(static function (): void {
+            UsageMetricBucket::query()->delete();
+        });
+
+        Log::info('Admin analytics history reset.');
     }
 
     private function safe(string $value, int $limit): string
