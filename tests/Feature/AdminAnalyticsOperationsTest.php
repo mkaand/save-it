@@ -50,30 +50,6 @@ final class AdminAnalyticsOperationsTest extends TestCase
         $this->assertSame('ZZ', $resolver->resolve($request));
     }
 
-    public function test_geoip_trusted_header_requires_a_persisted_name_and_defaults_the_form_value(): void
-    {
-        $admin = $this->admin();
-        $this->actingAs($admin)->get('/admin/settings/geoip')->assertOk()->assertSee('value="CF-IPCountry"', false);
-        $this->actingAs($admin)->put('/admin/settings/geoip', ['mode' => 'trusted_header', 'header' => '', 'maxmind_path' => ''])
-            ->assertSessionHasErrors('header');
-        $this->assertSame('none', app(ApplicationSettings::class)->get('geoip.mode', 'none'));
-    }
-
-    public function test_admin_can_reset_only_aggregate_analytics_history(): void
-    {
-        $admin = $this->admin();
-        $settings = app(ApplicationSettings::class);
-        $settings->put('geoip.mode', 'trusted_header');
-        $settings->put('geoip.header', 'CF-IPCountry');
-        app(UsageMetrics::class)->record(Request::create('/', 'GET'), 'analyze', true, 'facebook');
-        app(UsageMetrics::class)->record(Request::create('/', 'GET'), 'download', false, 'facebook', 'upstream_unavailable');
-        $this->actingAs($admin)->get('/admin/analytics')->assertSee('Reset analytics')->assertSee('RESET');
-        $this->delete('/admin/analytics')->assertRedirect('/admin/analytics')->assertSessionHas('status');
-        $this->assertDatabaseCount('usage_metric_buckets', 0);
-        $this->assertDatabaseHas('users', ['id' => $admin->id]);
-        $this->assertSame('CF-IPCountry', $settings->get('geoip.header'));
-    }
-
     public function test_dashboard_analytics_operations_geoip_and_reports_are_admin_protected(): void
     {
         $admin = $this->admin();

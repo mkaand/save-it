@@ -22,7 +22,7 @@ final class ShareMediaPreparationController extends Controller
 
         try {
             $prepared = $preparations->prepare($token);
-            $metrics->record($request, 'share_preparation', true, $prepared['provider']);
+            $metrics->record($request, 'share_preparation', true);
 
             return response()->json(['data' => [
                 'url' => route('api.share-preparations.show', ['preparation' => $prepared['id']], false),

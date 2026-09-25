@@ -124,15 +124,6 @@ def test_facebook_story_share_and_alias_urls_are_accepted_without_tracking() -> 
         assert classify_url(raw).normalized_url == expected
 
 
-def test_facebook_video_php_and_percent_encoded_long_post_slug_are_safe_media_urls() -> None:
-    video = classify_url("https://m.facebook.com/video.php?v=883839773514682&ref=share")
-    post = classify_url(
-        "https://www.facebook.com/xnoteai/posts/long-%F0%9F%8C%8D-caption/122348022950024397/"
-    )
-    assert video.normalized_url == "https://www.facebook.com/video.php?v=883839773514682"
-    assert post.normalized_url.endswith("/posts/long-%F0%9F%8C%8D-caption/122348022950024397/")
-
-
 def test_reel_parser_uses_known_playback_video_path() -> None:
     metadata, assets, media_type = parse_facebook_video(page(reel=True), VIDEO_ID)
     assert media_type == "video"

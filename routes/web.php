@@ -8,13 +8,11 @@ use App\Http\Controllers\Admin\PasswordController;
 use App\Http\Controllers\Admin\ProfileController;
 use App\Http\Controllers\Admin\ReportsController;
 use App\Http\Controllers\Admin\SettingsController;
-use App\Http\Controllers\IssueReportController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
     return view('welcome');
 });
-Route::post('/api/issue-reports', [IssueReportController::class, 'store'])->middleware('throttle:3,10')->name('issue-reports.store');
 
 Route::prefix('admin')->name('admin.')->group(function (): void {
     Route::get('/login', [AuthController::class, 'create'])->name('login');
@@ -27,7 +25,6 @@ Route::prefix('admin')->name('admin.')->group(function (): void {
     Route::middleware(['admin', 'auth.session'])->group(function (): void {
         Route::get('/', HomeController::class)->name('home');
         Route::get('/analytics', AnalyticsController::class)->name('analytics');
-        Route::delete('/analytics', [AnalyticsController::class, 'reset'])->name('analytics.reset');
         Route::get('/operations', [OperationsController::class, 'index'])->name('operations');
         Route::post('/operations/cleanup', [OperationsController::class, 'cleanup'])->name('operations.cleanup');
         Route::get('/reports', [ReportsController::class, 'index'])->name('reports');

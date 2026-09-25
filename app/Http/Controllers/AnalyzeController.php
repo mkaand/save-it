@@ -33,9 +33,7 @@ class AnalyzeController extends Controller
             ], $exception->httpStatus);
         }
 
-        // Public result contracts call this field `platform`; never infer it
-        // from, or retain, the submitted URL for analytics.
-        $metrics->record($request, 'analyze', true, is_string($data['platform'] ?? null) ? $data['platform'] : 'unknown');
+        $metrics->record($request, 'analyze', true, is_string($data['provider'] ?? null) ? $data['provider'] : 'unknown');
 
         return response()->json(['data' => $data]);
     }
