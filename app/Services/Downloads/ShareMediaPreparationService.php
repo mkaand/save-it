@@ -13,7 +13,7 @@ final class ShareMediaPreparationService
         private readonly ShareMediaPreparationStore $preparations,
     ) {}
 
-    /** @return array{id: string, filename: string} */
+    /** @return array{id: string, filename: string, provider: string} */
     public function prepare(string $token): array
     {
         $asset = $this->downloads->resolve($token);
@@ -53,7 +53,11 @@ final class ShareMediaPreparationService
             }
             chmod($path, 0600);
 
-            return ['id' => $this->preparations->issue($path, $this->filename($asset)), 'filename' => $this->filename($asset)];
+            return [
+                'id' => $this->preparations->issue($path, $this->filename($asset)),
+                'filename' => $this->filename($asset),
+                'provider' => is_string($asset['provider'] ?? null) ? $asset['provider'] : 'unknown',
+            ];
         } finally {
             File::deleteDirectory($work);
         }

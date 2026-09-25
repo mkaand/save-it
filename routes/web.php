@@ -25,6 +25,7 @@ Route::prefix('admin')->name('admin.')->group(function (): void {
     Route::middleware(['admin', 'auth.session'])->group(function (): void {
         Route::get('/', HomeController::class)->name('home');
         Route::get('/analytics', AnalyticsController::class)->name('analytics');
+        Route::delete('/analytics', [AnalyticsController::class, 'reset'])->name('analytics.reset');
         Route::get('/operations', [OperationsController::class, 'index'])->name('operations');
         Route::post('/operations/cleanup', [OperationsController::class, 'cleanup'])->name('operations.cleanup');
         Route::get('/reports', [ReportsController::class, 'index'])->name('reports');

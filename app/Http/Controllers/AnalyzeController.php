@@ -33,7 +33,7 @@ class AnalyzeController extends Controller
             ], $exception->httpStatus);
         }
 
-        $metrics->record($request, 'analyze', true, is_string($data['provider'] ?? null) ? $data['provider'] : 'unknown');
+        $metrics->record($request, 'analyze', true, is_string($data['platform'] ?? null) ? $data['platform'] : 'unknown');
 
         return response()->json(['data' => $data]);
     }
