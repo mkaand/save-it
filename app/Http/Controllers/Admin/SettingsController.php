@@ -137,9 +137,7 @@ final class SettingsController extends Controller
     {
         return view('admin.geoip', ['geoip' => [
             'mode' => $settings->get('geoip.mode', 'none'),
-            // Make the standard opt-in value visible as a value, not a hint
-            // that looks persisted while resolving to an empty header.
-            'header' => $settings->get('geoip.header', 'CF-IPCountry'),
+            'header' => $settings->get('geoip.header', ''),
             'maxmind_path' => $settings->get('geoip.maxmind_path', ''),
         ]]);
     }
@@ -151,9 +149,6 @@ final class SettingsController extends Controller
             'header' => ['nullable', 'regex:/^[A-Za-z0-9-]{1,100}$/'],
             'maxmind_path' => ['nullable', 'string', 'max:1024'],
         ]);
-        if ($data['mode'] === 'trusted_header' && blank($data['header'] ?? null)) {
-            return back()->withErrors(['header' => 'A trusted header name is required.'])->withInput();
-        }
         $settings->put('geoip.mode', $data['mode']);
         $settings->put('geoip.header', $data['header'] ?? '');
         $settings->put('geoip.maxmind_path', $data['maxmind_path'] ?? '');

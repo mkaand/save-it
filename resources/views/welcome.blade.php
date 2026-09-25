@@ -2,7 +2,6 @@
 <html lang="en" data-theme-mode="system">
 <head>
     <meta charset="utf-8">
-    <meta name="csrf-token" content="{{ csrf_token() }}">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="description" content="Analyze supported media URLs and securely download or prepare available formats with Save It. No account required.">
     <meta name="theme-color" content="#0b1220">
@@ -83,7 +82,6 @@
                 <a href="#platforms">Platforms</a>
                 <a href="#how-it-works">How it works</a>
                 <a href="#privacy">Privacy</a>
-                <button class="footer-report-link" type="button" data-issue-report-open>Report an issue</button>
             </nav>
 
             <div class="header-actions">
@@ -188,7 +186,6 @@
                         </div>
                         <p class="field-help" id="url-help">Use an HTTP or HTTPS link from the platform roadmap.</p>
                         <p class="field-error" id="url-error" role="alert" data-url-error hidden></p>
-                        <button class="text-button issue-context-link" type="button" data-issue-report-open hidden>Report this problem</button>
 
                         @if(app(\App\Services\Settings\Turnstile::class)->active())
                             <div class="cf-turnstile" data-sitekey="{{ app(\App\Services\Settings\Turnstile::class)->siteKey() }}"></div>
@@ -348,17 +345,5 @@
             <p class="copyright">© <span data-current-year></span> Save It</p>
         </div>
     </footer>
-    <dialog class="issue-report-dialog" data-issue-report-dialog aria-labelledby="issue-report-title">
-        <form data-issue-report-form novalidate>
-            <button class="dialog-close" type="button" aria-label="Close" data-issue-report-close>×</button>
-            <h2 id="issue-report-title">Report an issue</h2>
-            <p class="muted">Tell us what happened. A failed-analysis URL is included only when you explicitly send this report.</p>
-            <label>Email address<input name="email" type="email" autocomplete="email" required maxlength="254"></label>
-            <label>Message<textarea name="message" required maxlength="4000" rows="6"></textarea></label>
-            <input name="submitted_url" type="hidden"><input name="provider" type="hidden"><input name="error_code" type="hidden"><input name="request_id" type="hidden">
-            <p class="field-error" data-issue-report-error hidden></p><p class="analyzer-status" data-issue-report-status hidden></p>
-            <div class="actions"><button class="button" type="button" data-issue-report-close>Cancel</button><button class="button button-primary" type="submit">Send report</button></div>
-        </form>
-    </dialog>
 </body>
 </html>
