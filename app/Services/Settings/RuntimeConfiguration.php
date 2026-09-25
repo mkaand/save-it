@@ -25,12 +25,16 @@ final class RuntimeConfiguration
                 'mail.default' => 'smtp',
                 'mail.mailers.smtp.host' => $host,
                 'mail.mailers.smtp.port' => (int) $settings->get('mail.port', 587),
-                'mail.mailers.smtp.scheme' => $settings->get('mail.encryption', config('mail.mailers.smtp.scheme')) ?: null,
+                // A database override must not be replaced by an environment DSN.
+                'mail.mailers.smtp.url' => null,
                 'mail.mailers.smtp.username' => $settings->get('mail.username', config('mail.mailers.smtp.username')),
                 'mail.mailers.smtp.password' => $settings->get('mail.password', config('mail.mailers.smtp.password')),
                 'mail.from.address' => $settings->get('mail.from_address', config('mail.from.address')),
                 'mail.from.name' => $settings->get('mail.from_name', config('mail.from.name')),
             ]);
+            foreach (SmtpSecurity::options($settings->get('mail.encryption')) as $key => $value) {
+                config(["mail.mailers.smtp.{$key}" => $value]);
+            }
         }
     }
 }

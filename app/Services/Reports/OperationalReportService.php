@@ -2,31 +2,42 @@
 
 namespace App\Services\Reports;
 
+use App\Mail\OperationalReport;
 use App\Models\AdminReportDelivery;
 use App\Models\User;
 use App\Services\Analytics\UsageMetrics;
 use App\Services\Operations\OperationsService;
 use App\Services\Settings\ApplicationSettings;
+use App\Services\Settings\MailFailureReporter;
 use Illuminate\Support\Facades\Mail;
 
 final class OperationalReportService
 {
-    public function sendNow(?string $recipient = null): bool
+    public function sendNow(?string $recipient = null, ?int $hours = null): bool
     {
         $recipient ??= User::query()->where('is_admin', true)->value('email');
         if (! is_string($recipient) || ! filter_var($recipient, FILTER_VALIDATE_EMAIL) || ! $this->mailConfigured()) {
             return false;
         }
 
-        $summary = app(UsageMetrics::class)->summary(24);
+        $settings = app(ApplicationSettings::class);
+        $hours ??= $settings->get('reports.mode') === 'weekly' ? 168 : 24;
+        $hours = $hours === 168 ? 168 : 24;
+        $timezone = (string) $settings->get('reports.timezone', config('app.timezone', 'UTC'));
+        if (! in_array($timezone, timezone_identifiers_list(), true)) {
+            $timezone = 'UTC';
+        }
+        $summary = app(UsageMetrics::class)->summary($hours);
         $snapshot = app(OperationsService::class)->snapshot();
-        $text = $this->message($summary, $snapshot);
+        $report = app(OperationalReportData::class)->build($summary, $snapshot, $hours, $timezone);
 
         try {
-            Mail::raw($text, fn ($mail) => $mail->to($recipient)->subject('Save It operational report'));
+            Mail::to($recipient)->send(new OperationalReport($report));
 
             return true;
-        } catch (\Throwable) {
+        } catch (\Throwable $exception) {
+            MailFailureReporter::report('operational_report', $exception);
+
             return false;
         }
     }
@@ -56,7 +67,7 @@ final class OperationalReportService
             return;
         }
         $recipient = (string) $settings->get('reports.recipient', '');
-        if ($this->sendNow($recipient !== '' ? $recipient : null)) {
+        if ($this->sendNow($recipient !== '' ? $recipient : null, $mode === 'weekly' ? 168 : 24)) {
             AdminReportDelivery::query()->create(['period_key' => $period, 'sent_at' => now()]);
         }
     }
@@ -70,17 +81,5 @@ final class OperationalReportService
 
         return ! in_array(config('mail.default'), ['log', 'null', 'array'], true)
             && filled(config('mail.mailers.'.config('mail.default').'.host'));
-    }
-
-    /** @param array<string,mixed> $summary @param array<string,mixed> $snapshot */
-    private function message(array $summary, array $snapshot): string
-    {
-        $rows = $summary['rows'];
-        $providers = $rows->groupBy('provider')->map(fn ($items, $key) => $key.': '.$items->sum('count'))->implode("\n");
-        $countries = $rows->groupBy('country_code')->sortByDesc(fn ($items) => $items->sum('count'))->take(5)->map(fn ($items, $key) => $key.': '.$items->sum('count'))->implode("\n");
-        $errors = $rows->where('successful', false)->groupBy('error_code')->map(fn ($items, $key) => $key.': '.$items->sum('count'))->implode("\n");
-        $storage = collect($snapshot['storage'])->map(fn ($item, $key) => $key.': '.$item['count'].' files, '.$item['size'].' bytes')->implode("\n");
-
-        return "Save It operational report (last 24 hours)\n\nAnalyses and operations: {$summary['total']}\nSuccesses: {$summary['success']}\nErrors: {$summary['failed']}\n\nProviders:\n{$providers}\n\nCountries:\n{$countries}\n\nErrors:\n{$errors}\n\nQueue depth: {$snapshot['queue']['queue_depth']}\nFailed jobs: {$snapshot['queue']['failed_jobs']}\n\nStorage:\n{$storage}";
     }
 }

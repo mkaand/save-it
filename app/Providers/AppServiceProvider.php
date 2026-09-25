@@ -2,11 +2,13 @@
 
 namespace App\Providers;
 
+use App\Mail\RequiredStartTlsTransport;
 use App\Services\Settings\ApplicationSettings;
 use App\Services\Settings\RuntimeConfiguration;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\ServiceProvider;
@@ -26,6 +28,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        Mail::extend('required_starttls', fn (array $config) => RequiredStartTlsTransport::fromConfig($config));
         try {
             if (Schema::hasTable('application_settings')) {
                 app(RuntimeConfiguration::class)->apply(app(ApplicationSettings::class));
