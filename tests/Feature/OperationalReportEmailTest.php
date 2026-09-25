@@ -38,9 +38,10 @@ final class OperationalReportEmailTest extends TestCase
         $this->assertSame('81.8%', $data['success_rate']);
         $mail = new OperationalReport($data);
         $mail->assertSeeInHtml('Executive summary');
-        foreach (['YouTube', 'Facebook', 'Unknown / unclassified', 'ZZ · Unknown', 'TR', 'invalid_url', 'rate_limited', '1.0 MiB', 'Activity', 'System &amp; operations'] as $text) {
+        foreach (['YouTube', 'Facebook', 'ZZ · Unknown', 'TR', 'invalid_url', 'rate_limited', '1.0 MiB', 'Activity', 'System &amp; operations'] as $text) {
             $mail->assertSeeInHtml($text, false);
         }
+        $mail->assertDontSeeInHtml('Unknown / unclassified');
         $mail->assertSeeInText('Daily · last 24 hours');
         foreach (['private.example', 'do-not-render', '203.0.113.99', '<script', '<svg', '<canvas', '<img'] as $text) {
             $this->assertStringNotContainsString($text, $mail->render());

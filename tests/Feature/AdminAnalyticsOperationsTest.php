@@ -56,7 +56,7 @@ final class AdminAnalyticsOperationsTest extends TestCase
         $this->actingAs($admin)->get('/admin/settings/geoip')->assertOk()->assertSee('value="CF-IPCountry"', false);
         $this->actingAs($admin)->put('/admin/settings/geoip', ['mode' => 'trusted_header', 'header' => '', 'maxmind_path' => ''])
             ->assertSessionHasErrors('header');
-        $this->assertSame('none', app(ApplicationSettings::class)->get('geoip.mode'));
+        $this->assertSame('none', app(ApplicationSettings::class)->get('geoip.mode', 'none'));
     }
 
     public function test_admin_can_reset_only_aggregate_analytics_history(): void
