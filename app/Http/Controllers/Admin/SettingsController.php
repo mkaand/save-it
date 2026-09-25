@@ -4,7 +4,9 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Services\Settings\ApplicationSettings;
+use App\Services\Settings\MailFailureReporter;
 use App\Services\Settings\ProviderControl;
+use App\Services\Settings\SmtpSecurity;
 use App\Services\Settings\Turnstile;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -31,6 +33,7 @@ final class SettingsController extends Controller
     public function email(ApplicationSettings $settings): View
     {
         $mail = $settings->many(['mail.host', 'mail.port', 'mail.encryption', 'mail.username', 'mail.from_address', 'mail.from_name']);
+        $mail['mail.encryption'] = filled($mail['mail.host']) ? SmtpSecurity::mode($mail['mail.encryption']) : 'starttls';
         $configured = filled($mail['mail.host']) || (
             ! in_array(config('mail.default'), ['log', 'null', 'array'], true)
             && filled(config('mail.mailers.'.config('mail.default').'.host'))
@@ -42,8 +45,8 @@ final class SettingsController extends Controller
     public function updateEmail(Request $request, ApplicationSettings $settings): RedirectResponse
     {
         $data = $request->validate([
-            'host' => ['required', 'string', 'max:253'], 'port' => ['required', 'integer', 'between:1,65535'],
-            'encryption' => ['nullable', 'in:tls,ssl'], 'username' => ['nullable', 'string', 'max:254'],
+            'host' => ['required', 'string', 'max:253', 'regex:/^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/'], 'port' => ['required', 'integer', 'between:1,65535'],
+            'encryption' => ['nullable', 'in:starttls,smtps,plain,legacy_auto,tls,ssl,none'], 'username' => ['nullable', 'string', 'max:254', 'not_regex:/[\r\n]/'],
             'password' => ['nullable', 'string', 'max:1024'], 'from_address' => ['required', 'email:rfc', 'max:254'],
             'from_name' => ['required', 'string', 'max:120'],
         ]);
@@ -63,7 +66,9 @@ final class SettingsController extends Controller
             Mail::raw('Save It email configuration test.', fn ($message) => $message->to($request->user()->email)->subject('Save It test email'));
 
             return back()->with('status', 'Test email sent.');
-        } catch (\Throwable) {
+        } catch (\Throwable $exception) {
+            MailFailureReporter::report('test_email', $exception);
+
             return back()->withErrors(['email' => 'The test email could not be sent.']);
         }
     }
