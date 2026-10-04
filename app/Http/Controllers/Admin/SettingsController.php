@@ -135,9 +135,16 @@ final class SettingsController extends Controller
 
     public function geoip(ApplicationSettings $settings): View
     {
+        $mode = $settings->get('geoip.mode', 'none');
+        $header = $settings->get('geoip.header', '');
+
+        if ($mode === 'trusted_header' && blank($header)) {
+            $header = 'CF-IPCountry';
+        }
+
         return view('admin.geoip', ['geoip' => [
-            'mode' => $settings->get('geoip.mode', 'none'),
-            'header' => $settings->get('geoip.header', 'CF-IPCountry'),
+            'mode' => $mode,
+            'header' => $header,
             'maxmind_path' => $settings->get('geoip.maxmind_path', ''),
         ]]);
     }

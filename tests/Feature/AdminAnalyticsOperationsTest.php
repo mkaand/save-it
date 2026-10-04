@@ -56,6 +56,9 @@ final class AdminAnalyticsOperationsTest extends TestCase
     public function test_geoip_trusted_header_defaults_to_a_real_value_and_requires_a_header_on_save(): void
     {
         $admin = $this->admin();
+        $settings = app(ApplicationSettings::class);
+        $settings->put('geoip.mode', 'trusted_header');
+        $settings->put('geoip.header', '');
         $this->actingAs($admin)->get('/admin/settings/geoip')
             ->assertOk()
             ->assertSee('value="CF-IPCountry"', false)
@@ -70,7 +73,9 @@ final class AdminAnalyticsOperationsTest extends TestCase
             'mode' => 'maxmind', 'header' => '', 'maxmind_path' => '/missing.mmdb',
         ])->assertSessionHasNoErrors();
 
-        $settings = app(ApplicationSettings::class);
+        $settings->put('geoip.mode', 'trusted_header');
+        $settings->put('geoip.header', 'CF-IPCountry');
+        $this->actingAs($admin)->get('/admin/settings/geoip')->assertSee('value="CF-IPCountry"', false);
         $settings->put('geoip.header', 'X-Country-Code');
         $this->actingAs($admin)->get('/admin/settings/geoip')->assertSee('value="X-Country-Code"', false);
     }
