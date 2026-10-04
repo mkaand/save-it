@@ -2,22 +2,27 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { analysisFailureReportContext } from '../../resources/js/issue-report.js';
+import { analysisFailureReportContext, issueReportEventContext } from '../../resources/js/issue-report.js';
 
 const welcome = readFileSync(new URL('../../resources/views/welcome.blade.php', import.meta.url), 'utf8');
 const analyzer = readFileSync(new URL('../../resources/js/analyzer.js', import.meta.url), 'utf8');
 const issueReport = readFileSync(new URL('../../resources/js/issue-report.js', import.meta.url), 'utf8');
 
 test('issue reporting keeps only an allowlisted failed-analysis context', () => {
-    assert.deepEqual(analysisFailureReportContext({
+    const context = analysisFailureReportContext({
         submittedUrl: 'https://example.test/media',
         error: { provider: 'facebook', code: 'upstream_unavailable', request_id: 'safe_123', token: 'secret' },
-    }), {
+    });
+    assert.deepEqual(context, {
         submittedUrl: 'https://example.test/media', provider: 'facebook', errorCode: 'upstream_unavailable', requestId: 'safe_123',
     });
+    assert.deepEqual(issueReportEventContext(context), context);
     assert.deepEqual(analysisFailureReportContext({
         submittedUrl: 'https://example.test/media', error: { provider: 'evil', code: 'bad code', request_id: 'token=secret' },
     }), {
+        submittedUrl: 'https://example.test/media', provider: null, errorCode: null, requestId: null,
+    });
+    assert.deepEqual(issueReportEventContext({ submittedUrl: 'https://example.test/media', provider: 'evil', errorCode: 'bad code', requestId: 'token=secret' }), {
         submittedUrl: 'https://example.test/media', provider: null, errorCode: null, requestId: null,
     });
 });

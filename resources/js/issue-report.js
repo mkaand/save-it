@@ -13,6 +13,15 @@ export function analysisFailureReportContext({ submittedUrl, error = {} }) {
     };
 }
 
+export function issueReportEventContext(detail) {
+    return {
+        submittedUrl: safeString(detail?.submittedUrl, /[\s\S]*/, 2048),
+        provider: PROVIDERS.has(detail?.provider) ? detail.provider : null,
+        errorCode: safeString(detail?.errorCode, /^[a-z0-9_]{1,64}$/, 64),
+        requestId: safeString(detail?.requestId, /^[A-Za-z0-9_-]{1,128}$/, 128),
+    };
+}
+
 export function initIssueReport() {
     const dialog = document.querySelector('[data-issue-report-dialog]');
     const form = document.querySelector('[data-issue-report-form]');
@@ -64,7 +73,7 @@ export function initIssueReport() {
     document.querySelector('[data-issue-report-close]')?.addEventListener('click', () => dialog.close());
 
     document.addEventListener('save-it:analysis-failed', (event) => {
-        failedContext = analysisFailureReportContext(event.detail || {});
+        failedContext = issueReportEventContext(event.detail);
         failedOpener.hidden = false;
     });
 
