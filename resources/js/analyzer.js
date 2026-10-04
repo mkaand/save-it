@@ -39,6 +39,7 @@ import {
     createShareSession,
     releaseOtherPreparedShares as releaseOtherShareSessions,
 } from './share-session.js';
+import { analysisFailureReportContext } from './issue-report.js';
 
 export function shareStateLabel(phase, percent = null) {
     if (phase === 'preparing') {
@@ -599,6 +600,9 @@ export function initAnalyzer() {
             const payload = await response.json().catch(() => ({}));
 
             if (!response.ok) {
+                document.dispatchEvent(new CustomEvent('save-it:analysis-failed', {
+                    detail: analysisFailureReportContext({ submittedUrl, error: payload?.error }),
+                }));
                 const message = payload?.errors?.url?.[0]
                     || (response.status === 429 ? 'Too many analysis requests. Please wait a moment.' : null)
                     || payload?.error?.message

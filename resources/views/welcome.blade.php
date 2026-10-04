@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="description" content="Analyze supported media URLs and securely download or prepare available formats with Save It. No account required.">
     <meta name="theme-color" content="#0b1220">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="Save It">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -186,6 +187,7 @@
                         </div>
                         <p class="field-help" id="url-help">Use an HTTP or HTTPS link from the platform roadmap.</p>
                         <p class="field-error" id="url-error" role="alert" data-url-error hidden></p>
+                        <button class="issue-report-failed-trigger" type="button" data-issue-report-failed-open hidden>Report this issue</button>
 
                         @if(app(\App\Services\Settings\Turnstile::class)->active())
                             <div class="cf-turnstile" data-sitekey="{{ app(\App\Services\Settings\Turnstile::class)->siteKey() }}"></div>
@@ -342,8 +344,24 @@
                 <a href="#how-it-works">How it works</a>
                 <a href="#privacy">Privacy</a>
             </nav>
+            <button class="issue-report-footer-trigger" type="button" data-issue-report-open>Report an issue</button>
             <p class="copyright">© <span data-current-year></span> Save It</p>
         </div>
     </footer>
+
+    <dialog class="issue-report-dialog" aria-labelledby="issue-report-title" data-issue-report-dialog>
+        <form class="issue-report-form" novalidate data-issue-report-form>
+            <div class="issue-report-heading"><div><p class="eyebrow"><span></span> Support</p><h2 id="issue-report-title">Report an issue</h2></div><button class="issue-report-close" type="button" aria-label="Close issue report" data-issue-report-close>×</button></div>
+            <p class="issue-report-copy">Tell us what happened. Your report is sent directly to the configured support recipient.</p>
+            <label for="issue-report-email">Email address</label>
+            <input id="issue-report-email" name="email" type="email" autocomplete="email" maxlength="254" required>
+            <label for="issue-report-message">Message</label>
+            <textarea id="issue-report-message" name="message" rows="5" maxlength="5000" required></textarea>
+            <input name="submitted_url" type="hidden"><input name="provider" type="hidden"><input name="error_code" type="hidden"><input name="request_id" type="hidden">
+            <div class="issue-report-context" data-issue-report-context hidden><strong>Submitted URL</strong><code data-issue-report-url></code><p>The submitted URL and limited diagnostic information will be included with this report.</p></div>
+            <p class="issue-report-status" aria-live="polite" data-issue-report-status></p>
+            <div class="issue-report-actions"><button class="issue-report-cancel" type="button" data-issue-report-close>Cancel</button><button class="issue-report-submit" type="submit" data-issue-report-submit>Send report</button></div>
+        </form>
+    </dialog>
 </body>
 </html>
