@@ -1514,6 +1514,42 @@ summary:focus-visible {
     gap: 1rem;
 }
 
+.issue-report-footer-trigger,
+.issue-report-failed-trigger,
+.issue-report-cancel,
+.issue-report-submit,
+.issue-report-close {
+    font: inherit;
+    cursor: pointer;
+}
+
+.issue-report-footer-trigger,
+.issue-report-failed-trigger,
+.issue-report-cancel {
+    border: 0;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    text-decoration: underline;
+    text-underline-offset: 0.2rem;
+}
+
+.issue-report-failed-trigger { margin-top: 0.45rem; padding: 0; color: var(--danger); font-size: 0.72rem; }
+.issue-report-dialog { width:min(34rem,calc(100% - 2rem)); max-height:calc(100dvh - 2rem); overflow:auto; padding:0; border:1px solid var(--border-strong); border-radius:1rem; background:var(--surface-raised); color:var(--text); box-shadow:0 1.5rem 4rem rgba(0,0,0,0.35); }
+.issue-report-dialog::backdrop { background:rgba(5,10,20,0.62); }
+.issue-report-form { padding:clamp(1.25rem,4vw,2rem); }
+.issue-report-heading { display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; }
+.issue-report-heading h2 { margin:0.25rem 0 0; font-size:1.45rem; }
+.issue-report-close { width:2.25rem; height:2.25rem; border:1px solid var(--border); border-radius:0.65rem; background:var(--surface); color:var(--text-muted); font-size:1.35rem; line-height:1; }
+.issue-report-copy { margin:1rem 0; color:var(--text-muted); font-size:0.82rem; line-height:1.5; }
+.issue-report-form label { display:block; margin:1rem 0 0.4rem; font-size:0.8rem; font-weight:700; }
+.issue-report-form input:not([type="hidden"]),.issue-report-form textarea { width:100%; border:1px solid var(--border); border-radius:0.7rem; background:var(--surface); color:var(--text); padding:0.75rem; resize:vertical; }
+.issue-report-context { margin-top:1rem; padding:0.8rem; border:1px solid var(--border); border-radius:0.7rem; background:var(--surface); font-size:0.76rem; }
+.issue-report-context code { display:block; margin-top:0.35rem; color:var(--text-muted); overflow-wrap:anywhere; white-space:pre-wrap; }
+.issue-report-context p,.issue-report-status { margin:0.55rem 0 0; color:var(--text-muted); font-size:0.72rem; line-height:1.45; }
+.issue-report-status[data-state="success"] { color:var(--success); }.issue-report-status[data-state="error"] { color:var(--danger); }
+.issue-report-actions { display:flex; justify-content:flex-end; gap:0.7rem; margin-top:1.25rem; }.issue-report-submit { min-height:2.7rem; border:0; border-radius:0.72rem; padding:0.65rem 1rem; background:var(--accent); color:var(--accent-contrast); font-weight:760; }.issue-report-submit:disabled { cursor:wait; opacity:0.7; }
+
 @keyframes spin {
     to {
         transform: rotate(360deg);
