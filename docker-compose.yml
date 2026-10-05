@@ -142,7 +142,8 @@ services:
     <<: *app-service
     container_name: media-downloader-worker
     command: ["php", "artisan", "queue:work", "redis", "--sleep=3", "--tries=1", "--timeout=900", "--no-interaction"]
-    stop_grace_period: 30s
+    # Let an in-flight bounded media job finish before Compose sends SIGKILL.
+    stop_grace_period: 15m
 
   scheduler:
     <<: *app-service

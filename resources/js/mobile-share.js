@@ -9,6 +9,9 @@ const EXTENSIONS = new Map([
     ['image/png', 'png'],
     ['image/webp', 'webp'],
 ]);
+const OPFS_TEMP_ROOT = 'save-it-share-temp';
+const OPFS_SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const OPFS_STALE_SCAN_LIMIT = 20;
 
 export class ShareMediaError extends Error {
     constructor(code, message, status = null) {
@@ -46,6 +49,17 @@ function sameOriginPreparationUrl(value) {
     try {
         const url = new URL(value, window.location.origin);
         return url.origin === window.location.origin && /^\/api\/share-preparations\/[a-z0-9]{48}$/.test(url.pathname)
+            ? url
+            : null;
+    } catch {
+        return null;
+    }
+}
+
+function sameOriginPreparationStatusUrl(value) {
+    try {
+        const url = new URL(value, window.location.origin);
+        return url.origin === window.location.origin && /^\/api\/share-preparation-jobs\/[a-z0-9]{48}$/.test(url.pathname)
             ? url
             : null;
     } catch {
@@ -150,7 +164,241 @@ export async function responseBlob(response, size, onState = () => {}) {
     return new Blob(chunks, { type: response.headers.get('content-type') || '' });
 }
 
-export async function prepareShareMedia(output, onState = () => {}) {
+export function loadPreparedBlob(url, size, onState = () => {}, {
+    requestFactory = () => new XMLHttpRequest(),
+    timeoutMs = 0,
+} = {}) {
+    return new Promise((resolve, reject) => {
+        let request;
+        let lastPercent = 0;
+        const fail = () => reject(new ShareMediaError(
+            'share_unavailable',
+            'The prepared file could not be loaded for sharing.',
+        ));
+        try {
+            request = requestFactory();
+            request.open('GET', url.toString(), true);
+            request.responseType = 'blob';
+            request.timeout = timeoutMs;
+            request.onprogress = (event) => {
+                if (!Number.isFinite(event.loaded) || event.loaded < 0) {
+                    return;
+                }
+                const percent = Math.min(100, Math.max(0, Math.floor((event.loaded / size) * 100)));
+                if (percent > lastPercent) {
+                    lastPercent = percent;
+                    onState({ phase: 'loading', percent });
+                }
+            };
+            request.onerror = fail;
+            request.onabort = fail;
+            request.ontimeout = fail;
+            request.onload = () => {
+                const blob = request.response;
+                const contentType = request.getResponseHeader?.('content-type');
+                const mime = mediaType(contentType || blob?.type);
+                if (request.status !== 200 || !(blob instanceof Blob) || blob.size !== size || mime !== 'video/mp4' || (blob.type && mediaType(blob.type) !== 'video/mp4')) {
+                    fail();
+
+                    return;
+                }
+                onState({ phase: 'preparing', stage: 'Finalizing', percent: null });
+                resolve({
+                    blob,
+                    mime,
+                    disposition: request.getResponseHeader?.('content-disposition') || null,
+                });
+            };
+            onState({ phase: 'loading', percent: 0 });
+            request.send();
+        } catch {
+            fail();
+        }
+    });
+}
+
+function preparedMediaLoadError() {
+    return new ShareMediaError('share_unavailable', 'The prepared file could not be loaded for sharing.');
+}
+
+function opfsSessionName(now, randomUuid) {
+    return `session-${now()}-${randomUuid()}`;
+}
+
+async function removeOpfsSession(root, name) {
+    try {
+        await root.removeEntry(name, { recursive: true });
+    } catch {
+        // OPFS cleanup is best-effort and must never surface browser internals.
+    }
+}
+
+async function removeStaleOpfsSessions(root, now) {
+    if (!root.entries) {
+        return;
+    }
+    let scanned = 0;
+    for await (const [name, handle] of root.entries()) {
+        if (scanned >= OPFS_STALE_SCAN_LIMIT) {
+            return;
+        }
+        scanned += 1;
+        const match = /^session-([0-9]{13})-[0-9a-f-]{36}$/i.exec(name);
+        if (handle.kind === 'directory' && match && Number(match[1]) < now() - OPFS_SESSION_MAX_AGE_MS) {
+            await removeOpfsSession(root, name);
+        }
+    }
+}
+
+function opfsSupported(storageDirectoryFactory, randomUuid) {
+    return typeof storageDirectoryFactory === 'function' && typeof randomUuid === 'function';
+}
+
+export function transferPercent(received, size) {
+    if (!Number.isSafeInteger(received) || !Number.isSafeInteger(size) || received < 0 || size < 1) {
+        return null;
+    }
+
+    return Math.min(100, Math.max(0, Math.floor((received / size) * 100)));
+}
+
+export async function streamPreparedMediaToOpfs(url, size, output, onState = () => {}, {
+    storageDirectoryFactory = () => navigator.storage?.getDirectory?.(),
+    randomUuid = () => crypto.randomUUID(),
+    now = () => Date.now(),
+    fetcher = fetch,
+} = {}) {
+    if (!opfsSupported(storageDirectoryFactory, randomUuid)) {
+        return null;
+    }
+    let tempRoot;
+    let sessionName;
+    let reader;
+    let writable;
+    let cleaned = false;
+    const cleanup = async () => {
+        if (cleaned || !tempRoot || !sessionName) {
+            return;
+        }
+        cleaned = true;
+        await removeOpfsSession(tempRoot, sessionName);
+    };
+    try {
+        const root = await storageDirectoryFactory();
+        if (!root?.getDirectoryHandle) {
+            return null;
+        }
+        tempRoot = await root.getDirectoryHandle(OPFS_TEMP_ROOT, { create: true });
+        if (!tempRoot?.getDirectoryHandle || !tempRoot?.removeEntry) {
+            return null;
+        }
+        await removeStaleOpfsSessions(tempRoot, now);
+        sessionName = opfsSessionName(now, randomUuid);
+        const session = await tempRoot.getDirectoryHandle(sessionName, { create: true });
+        const filename = sharedFilename(output, 'video/mp4');
+        const fileHandle = await session.getFileHandle(filename, { create: true });
+        writable = await fileHandle.createWritable();
+        const response = await fetcher(url);
+        const responseMime = mediaType(response.headers?.get?.('content-type'));
+        if (!response.ok || response.status !== 200 || responseMime !== 'video/mp4' || !response.body?.getReader) {
+            throw preparedMediaLoadError();
+        }
+        reader = response.body.getReader();
+        let received = 0;
+        let lastPercent = 0;
+        onState({ phase: 'loading', percent: 0 });
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) {
+                break;
+            }
+            if (!(value instanceof Uint8Array) || value.byteLength < 1 || received + value.byteLength > size) {
+                throw preparedMediaLoadError();
+            }
+            await writable.write(value);
+            received += value.byteLength;
+            const percent = transferPercent(received, size);
+            if (percent > lastPercent) {
+                lastPercent = percent;
+                onState({ phase: 'loading', percent });
+            }
+        }
+        if (received !== size) {
+            throw preparedMediaLoadError();
+        }
+        await writable.close();
+        writable = null;
+        onState({ phase: 'preparing', stage: 'Finalizing', percent: null });
+        const stored = await fileHandle.getFile();
+        if (!(stored instanceof File) || stored.size !== size || stored.size < 1 || stored.size !== Number(size)) {
+            throw preparedMediaLoadError();
+        }
+        // OPFS commonly derives type from the .mp4 filename. If it does not,
+        // File references the OPFS-backed Blob without an ArrayBuffer/byte copy.
+        const file = mediaType(stored.type) === 'video/mp4'
+            ? stored
+            : new File([stored], filename, { type: 'video/mp4', lastModified: stored.lastModified });
+        if (file.size !== size || mediaType(file.type) !== 'video/mp4') {
+            throw preparedMediaLoadError();
+        }
+        return { file, cleanup };
+    } catch {
+        try {
+            await reader?.cancel?.();
+        } catch {
+            // Ignore reader cancellation failures while cleaning this session.
+        }
+        try {
+            await writable?.abort?.();
+        } catch {
+            // Ignore writable abort failures while cleaning this session.
+        }
+        await cleanup();
+        throw preparedMediaLoadError();
+    }
+}
+
+const pause = (milliseconds) => new Promise((resolve) => globalThis.setTimeout(resolve, milliseconds));
+
+async function preparedMediaFromJob(statusUrl, onState, { pollIntervalMs, sleep }) {
+    while (true) {
+        const response = await fetch(statusUrl, { headers: { Accept: 'application/json' } });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) {
+            throw preparationError(response, payload);
+        }
+        const state = payload?.data;
+        if (!['queued', 'processing', 'ready', 'failed'].includes(state?.status)) {
+            throw new ShareMediaError('share_unavailable', 'The file could not be prepared for sharing.', response.status);
+        }
+        if (state.status === 'failed') {
+            throw preparationError(response, { error: state.error });
+        }
+        if (state.status === 'ready') {
+            const url = sameOriginPreparationUrl(state.url);
+            if (!url || state.mime_type !== 'video/mp4' || typeof state.filename !== 'string') {
+                throw new ShareMediaError('share_unavailable', 'The file could not be prepared for sharing.', response.status);
+            }
+
+            return { url, filename: state.filename, mime_type: state.mime_type };
+        }
+        const percent = Number.isInteger(state.progress) && state.progress >= 0 && state.progress <= 100
+            ? state.progress
+            : null;
+        onState({ phase: 'preparing', stage: typeof state.stage === 'string' ? state.stage : 'Preparing', percent });
+        await sleep(pollIntervalMs);
+    }
+}
+
+export async function prepareShareMedia(output, onState = () => {}, {
+    pollIntervalMs = 1000,
+    sleep = pause,
+    requestFactory,
+    storageDirectoryFactory,
+    randomUuid,
+    now,
+    fetcher = fetch,
+} = {}) {
     if (output?.share?.eligible === false) {
         throw new ShareMediaError('media_too_large', 'Download only · Too large for Share / Save');
     }
@@ -162,30 +410,33 @@ export async function prepareShareMedia(output, onState = () => {}) {
     if (!url) {
         throw new Error('This file is no longer available. Analyze the URL again.');
     }
+    let preparedArtifact = false;
     if (mediaType(output?.mime_type) === 'video/mp4') {
-        onState({ phase: 'preparing' });
+        onState({ phase: 'preparing', stage: 'Queued', percent: null });
         const token = tokenFromDelivery(url);
         if (!token) {
             throw new Error('This file is no longer available. Analyze the URL again.');
         }
-        const preparation = await fetch('/api/share-preparations', {
+        const preparation = await fetcher('/api/share-preparations', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
             body: JSON.stringify({ token }),
         });
         const data = await preparation.json().catch(() => null);
-        const preparedUrl = sameOriginPreparationUrl(data?.data?.url);
-        if (!preparation.ok) {
+        const statusUrl = sameOriginPreparationStatusUrl(data?.data?.status_url);
+        if (!preparation.ok || preparation.status !== 202) {
             throw preparationError(preparation, data);
         }
-        if (!preparedUrl || data?.data?.mime_type !== 'video/mp4') {
+        if (!statusUrl) {
             throw new ShareMediaError('share_unavailable', 'The file could not be prepared for sharing.', preparation.status);
         }
-        url = preparedUrl;
-        output = { ...output, filename: data.data.filename, mime_type: data.data.mime_type };
+        const prepared = await preparedMediaFromJob(statusUrl, onState, { pollIntervalMs, sleep });
+        url = prepared.url;
+        output = { ...output, filename: prepared.filename, mime_type: prepared.mime_type };
+        preparedArtifact = true;
     }
     onState({ phase: 'loading', percent: null });
-    const probe = await fetch(url, { headers: { Range: 'bytes=0-0' } });
+    const probe = await fetcher(url, { headers: { Range: 'bytes=0-0' } });
     const range = probe.headers.get('content-range') || '';
     const match = /^bytes 0-0\/([0-9]+)$/.exec(range);
     const size = match ? Number(match[1]) : Number(probe.headers.get('content-length'));
@@ -193,21 +444,50 @@ export async function prepareShareMedia(output, onState = () => {}) {
     if (!Number.isSafeInteger(size) || size < 1 || size > maximum) {
         throw new ShareMediaError('media_too_large', 'Download only · Too large for Share / Save');
     }
-    const response = await fetch(url);
-    if (!response.ok) {
+    let blob;
+    let mime;
+    let disposition = null;
+    let cleanup = null;
+    if (preparedArtifact) {
+        const stored = await streamPreparedMediaToOpfs(url, size, output, onState, {
+            storageDirectoryFactory,
+            randomUuid,
+            now,
+            fetcher,
+        });
+        if (stored) {
+            return Object.freeze({
+                file: stored.file,
+                title: output.label || 'Save It media',
+                cleanup: stored.cleanup,
+            });
+        }
+        const loaded = await loadPreparedBlob(url, size, onState, { requestFactory });
+        blob = loaded.blob;
+        mime = loaded.mime;
+        disposition = loaded.disposition;
+    } else {
+        const response = await fetcher(url);
+        if (!response.ok) {
+            throw new ShareMediaError('share_unavailable', 'The file could not be prepared for sharing.');
+        }
+        blob = await responseBlob(response, size, onState);
+        mime = mediaType(response.headers.get('content-type')) || mediaType(blob.type);
+        disposition = response.headers.get('content-disposition');
+    }
+    if (blob.size !== size || blob.size > maximum || !mime) {
         throw new ShareMediaError('share_unavailable', 'The file could not be prepared for sharing.');
     }
-    const blob = await responseBlob(response, size, onState);
-    const mime = mediaType(response.headers.get('content-type')) || mediaType(blob.type);
-    if (blob.size !== size || blob.size > maximum) {
-        throw new ShareMediaError('share_unavailable', 'The file could not be prepared for sharing.');
+    let file;
+    try {
+        file = new File([blob], sharedFilename(output, mime, disposition), { type: mime });
+    } catch {
+        throw new ShareMediaError('share_unavailable', 'The prepared file could not be loaded for sharing.');
     }
-    const file = new File([blob], sharedFilename(output, mime || blob.type, response.headers.get('content-disposition')), {
-        type: mime || mediaType(blob.type) || 'application/octet-stream',
-    });
     return Object.freeze({
         file,
         title: output.label || 'Save It media',
+        cleanup,
     });
 }
 

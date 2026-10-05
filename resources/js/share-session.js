@@ -10,18 +10,33 @@ export function createShareSession(output, {
     onState = () => {},
     open = openShareSheet,
     prepare = prepareShareMedia,
+    schedule = globalThis.setTimeout,
+    cancel = globalThis.clearTimeout,
+    shareSettlementTimeoutMs = 45_000,
 } = {}) {
     let generation = 0;
     let phase = 'idle';
     let prepared = null;
+    let releasedPrepared = null;
     let preparing = false;
 
     function publish(state = { phase }) {
         onState(state);
     }
 
+    function cleanupPrepared(value) {
+        return Promise.resolve(value?.cleanup?.()).catch(() => {});
+    }
+
     function release() {
         generation += 1;
+        if (prepared) {
+            if (phase === 'sharing') {
+                releasedPrepared = prepared;
+            } else {
+                cleanupPrepared(prepared);
+            }
+        }
         prepared = null;
         if (phase !== 'sharing') {
             phase = 'idle';
@@ -52,12 +67,40 @@ export function createShareSession(output, {
                 return Promise.resolve();
             }
 
-            return Promise.resolve(opening).then(() => {
-                prepared = null;
-                phase = 'idle';
+            // iOS can leave a Web Share promise pending after the system
+            // sheet hands off to Photos. The prepared artifact remains private
+            // server-side; recover this button deterministically for retry.
+            let recoveryTimer;
+            const recovery = new Promise((resolve) => {
+                recoveryTimer = schedule(() => resolve({ recovered: true }), shareSettlementTimeoutMs);
+            });
+
+            return Promise.race([Promise.resolve(opening).then(() => ({ recovered: false })), recovery]).then(async ({ recovered }) => {
+                cancel(recoveryTimer);
+                if (releasedPrepared) {
+                    await cleanupPrepared(releasedPrepared);
+                    releasedPrepared = null;
+                    phase = 'idle';
+                } else if (recovered) {
+                    phase = 'ready';
+                } else {
+                    const completed = prepared;
+                    prepared = null;
+                    await cleanupPrepared(completed);
+                    phase = 'idle';
+                }
                 publish();
-            }).catch((error) => {
-                phase = 'ready';
+            }).catch(async (error) => {
+                cancel(recoveryTimer);
+                if (releasedPrepared) {
+                    await cleanupPrepared(releasedPrepared);
+                    releasedPrepared = null;
+                    phase = 'idle';
+                    publish();
+
+                    return;
+                }
+                phase = prepared ? 'ready' : 'idle';
                 publish();
                 const message = shareErrorMessage(error);
                 if (message) {
@@ -77,6 +120,7 @@ export function createShareSession(output, {
             publish(state);
         })).then((result) => {
             if (currentGeneration !== generation) {
+                cleanupPrepared(result);
                 return;
             }
 

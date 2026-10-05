@@ -78,6 +78,24 @@ class FacebookMetadataClient:
                 raise _error("provider_response_changed", 502) from exc
             return await self._fetch_document(target)
         page = await self._fetch_document(canonical_url)
+        if not page.html and (expected := direct_video_target(original.normalized_url)):
+            # A logged-out /login redirect is not proof that a public video is
+            # private. Use Facebook's official tokenless oEmbed surface only
+            # when it returns the same, identity-bound direct player target.
+            payload = await self._public_surface(
+                "https://graph.facebook.com/v26.0/oembed_video?"
+                + urlencode({"url": original.normalized_url, "omitscript": "true"}),
+                frozenset({"graph.facebook.com"}),
+                "application/json",
+            )
+            try:
+                target = oembed_video_target(json.loads(payload))
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise _error("provider_response_changed", 502) from exc
+            resolved = direct_video_target(target)
+            if resolved is None or resolved[1] != expected[1]:
+                raise _error("provider_response_changed", 502)
+            page = await self._fetch_document(target)
         parsed = urlsplit(page.url)
         if parsed.path in {"/story.php", "/permalink.php"} or "/posts/" in parsed.path:
             # Resolve the primary player in the official embed for this exact

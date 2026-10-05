@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Services\Downloads\DownloadAssetStore;
 use App\Services\Downloads\DownloadPipeline;
+use App\Services\Downloads\ShareMediaPreparationService;
 use App\Services\Downloads\ShareMediaPreparationStore;
 use App\Services\Downloads\UpstreamUrlPolicy;
 use Illuminate\Support\Facades\File;
@@ -75,12 +76,12 @@ final class FacebookCompositeDeliveryTest extends TestCase
             $this->assertSame(substr(file_get_contents($result['path']), (int) explode('-', $range)[0], $length), $response->streamedContent());
         }
         $this->flushHeaders();
-        $share = $this->postJson('/api/share-preparations', ['token' => $token])->assertOk()->json('data.url');
-        $prepared = app(ShareMediaPreparationStore::class)->resolve(basename($share));
+        $share = app(ShareMediaPreparationService::class)->prepare($token);
+        $prepared = app(ShareMediaPreparationStore::class)->resolve($share['id']);
         $this->files[] = $prepared['path'];
         $this->assertAv($prepared['path']);
         $this->assertSame(104857600, config('services.downloads.share_max_file_bytes'));
-        $this->assertStringNotContainsString('fbcdn.net', $share);
+        $this->assertStringNotContainsString('fbcdn.net', $share['id']);
         Http::assertSentCount(2);
     }
 

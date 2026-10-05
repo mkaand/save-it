@@ -29,9 +29,16 @@ class FacebookProviderAdapter:
             raise ProviderError(
                 "unsupported_url", "Invalid Facebook content URL.", 422, {"provider": "facebook"}
             )
-        page = await self.client.fetch_page(
-            source if source.startswith("https://") else context.normalized_url
+        # Only short/share URLs retain their original shape for Facebook's
+        # resolver. Direct pages use the canonical form, so a localized post
+        # caption cannot select a different public document surface.
+        parsed_source = urlsplit(source)
+        fetch_url = (
+            source
+            if parsed_source.hostname == "fb.watch" or parsed_source.path.startswith("/share/")
+            else context.normalized_url
         )
+        page = await self.client.fetch_page(fetch_url)
         # Test clients may intentionally provide only HTML. Production clients
         # retain the validated terminal page URL after a bounded redirect chain.
         page_url = page.url if hasattr(page, "url") else context.normalized_url

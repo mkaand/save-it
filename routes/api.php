@@ -5,6 +5,7 @@ use App\Http\Controllers\Downloads\DownloadController;
 use App\Http\Controllers\Downloads\DownloadJobController;
 use App\Http\Controllers\Downloads\ShareMediaPreparationController;
 use App\Http\Controllers\Downloads\ShareMediaPreparationDownloadController;
+use App\Http\Controllers\Downloads\ShareMediaPreparationJobController;
 use App\Http\Controllers\Previews\RecentPreviewController;
 use Illuminate\Support\Facades\Route;
 
@@ -25,6 +26,11 @@ Route::get('/share-preparations/{preparation}', ShareMediaPreparationDownloadCon
     ->where('preparation', '[a-z0-9]{48}')
     ->middleware('redis.rate:download')
     ->name('api.share-preparations.show');
+
+Route::get('/share-preparation-jobs/{job}', ShareMediaPreparationJobController::class)
+    ->where('job', '[a-z0-9]{48}')
+    ->middleware('redis.rate:job_poll')
+    ->name('api.share-preparation-jobs.show');
 
 Route::get('/previews/{preview}', RecentPreviewController::class)
     ->where('preview', '[a-z0-9]{48}')

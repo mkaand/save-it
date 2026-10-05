@@ -77,6 +77,15 @@ def test_facebook_video_and_reel_urls_normalize_without_tracking() -> None:
     assert reel.normalized_url == "https://www.facebook.com/reel/588631943886661"
 
 
+def test_facebook_video_php_and_localized_post_slug_canonicalize_to_safe_media_paths() -> None:
+    video = classify_url("https://m.facebook.com/video.php?v=883839773514682&ref=sharing")
+    post = classify_url(
+        "https://www.facebook.com/xnoteai/posts/long-%F0%9F%8C%8D-caption/122348022950024397/"
+    )
+    assert video.normalized_url == "https://www.facebook.com/video.php?v=883839773514682"
+    assert post.normalized_url == "https://www.facebook.com/xnoteai/posts/122348022950024397/"
+
+
 @pytest.mark.parametrize(
     "url",
     [

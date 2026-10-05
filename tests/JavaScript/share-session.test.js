@@ -71,6 +71,36 @@ test('ready activation opens synchronously without a second preparation and igno
     assert.equal(session.prepared, null);
 });
 
+test('a Web Share promise that never settles retains the prepared artifact for a retry', async () => {
+    let recover;
+    let cancelled = 0;
+    const states = [];
+    const session = createShareSession({}, {
+        onState: ({ phase }) => states.push(phase),
+        prepare: async () => ({ file: {}, title: 'Media', cleanup: async () => { throw new Error('must not run'); } }),
+        open: () => new Promise(() => {}),
+        schedule: (callback) => {
+            recover = callback;
+            return 'timer';
+        },
+        cancel: (timer) => {
+            assert.equal(timer, 'timer');
+            cancelled += 1;
+        },
+    });
+
+    await session.activate();
+    const opening = session.activate();
+    assert.equal(session.phase, 'sharing');
+    recover();
+    await opening;
+
+    assert.equal(session.phase, 'ready');
+    assert.equal(session.prepared !== null, true);
+    assert.equal(cancelled, 1);
+    assert.deepEqual(states, ['ready', 'sharing', 'ready']);
+});
+
 test('AbortError and NotAllowedError preserve the prepared file for retry without refetching', async () => {
     const errors = [];
     let prepareCalls = 0;
@@ -121,20 +151,47 @@ test('release invalidates pending and ready prepared files when analysis or outp
 
     const preparing = session.activate();
     session.release();
-    resolvePreparation({ file: {}, title: 'Media' });
+    let cleanedPending = 0;
+    resolvePreparation({ file: {}, title: 'Media', cleanup: async () => { cleanedPending += 1; } });
     await preparing;
 
     assert.equal(session.phase, 'idle');
     assert.equal(session.prepared, null);
+    assert.equal(cleanedPending, 1);
 
+    let cleanedReady = 0;
     const readySession = createShareSession({}, {
-        prepare: async () => ({ file: {}, title: 'Media' }),
+        prepare: async () => ({ file: {}, title: 'Media', cleanup: async () => { cleanedReady += 1; } }),
     });
     await readySession.activate();
     assert.equal(readySession.phase, 'ready');
     readySession.release();
     assert.equal(readySession.phase, 'idle');
     assert.equal(readySession.prepared, null);
+    assert.equal(cleanedReady, 1);
+});
+
+test('successful sharing cleans an OPFS prepared artifact while retryable share errors retain it', async () => {
+    let cleanupCalls = 0;
+    let opens = 0;
+    const prepared = { file: {}, title: 'Media', cleanup: async () => { cleanupCalls += 1; } };
+    const session = createShareSession({}, {
+        prepare: async () => prepared,
+        open: () => {
+            opens += 1;
+            return opens === 1
+                ? Promise.reject(Object.assign(new Error('Dismissed'), { name: 'AbortError' }))
+                : Promise.resolve();
+        },
+    });
+
+    await session.activate();
+    await session.activate();
+    assert.equal(session.phase, 'ready');
+    assert.equal(cleanupCalls, 0);
+    await session.activate();
+    assert.equal(cleanupCalls, 1);
+    assert.equal(session.phase, 'idle');
 });
 
 test('a too-large preparation never enters ready state', async () => {

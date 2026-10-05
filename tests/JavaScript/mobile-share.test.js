@@ -2,17 +2,50 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { File } from 'node:buffer';
+import { createShareSession } from '../../resources/js/share-session.js';
 
 import {
     canOfferMobileShare,
     isShareAbortError,
+    loadPreparedBlob,
     openShareSheet,
     prepareShareMedia,
     responseBlob,
     shareErrorMessage,
     ShareMediaError,
     sharedFilename,
+    streamPreparedMediaToOpfs,
+    transferPercent,
 } from '../../resources/js/mobile-share.js';
+
+function preparedBlobRequest({ blob, status = 200, headers = {}, progress = [], failure = null, calls = null }) {
+    return () => {
+        const request = {
+            open(method, url) {
+                calls?.push({ method, url });
+            },
+            getResponseHeader(name) {
+                return headers[name.toLowerCase()] || null;
+            },
+            send() {
+                assert.equal(this.responseType, 'blob');
+                if (failure) {
+                    this[failure]?.();
+
+                    return;
+                }
+                for (const loaded of progress) {
+                    this.onprogress?.({ loaded });
+                }
+                this.status = status;
+                this.response = blob;
+                this.onload?.();
+            },
+        };
+
+        return request;
+    };
+}
 
 const share = (eligible = null, size = null) => ({
     eligible,
@@ -20,6 +53,64 @@ const share = (eligible = null, size = null) => ({
     max_bytes: 104_857_600,
     size_bytes: size,
 });
+
+function opfsFixture({ file, failWrite = false, failClose = false, failGetFile = false, entries = [] } = {}) {
+    const writes = [];
+    const removed = [];
+    const sessions = new Map();
+    const writable = {
+        async write(chunk) {
+            if (failWrite) {
+                throw new Error('raw write failure');
+            }
+            writes.push(chunk);
+        },
+        async close() {
+            if (failClose) {
+                throw new Error('raw close failure');
+            }
+        },
+        async abort() {},
+    };
+    const fileHandle = {
+        createWritable: async () => writable,
+        getFile: async () => {
+            if (failGetFile) {
+                throw new Error('raw getFile failure');
+            }
+            return file;
+        },
+    };
+    const tempRoot = {
+        async getDirectoryHandle(name, options) {
+            if (options?.create) {
+                const session = { getFileHandle: async () => fileHandle, kind: 'directory' };
+                sessions.set(name, session);
+                return session;
+            }
+            return sessions.get(name);
+        },
+        async removeEntry(name) {
+            removed.push(name);
+            sessions.delete(name);
+        },
+        async *entries() {
+            yield* entries;
+        },
+    };
+    const root = { getDirectoryHandle: async () => tempRoot };
+
+    return { root, writes, removed };
+}
+
+function preparedStream(chunks, type = 'video/mp4') {
+    return new Response(new ReadableStream({
+        start(controller) {
+            chunks.forEach((chunk) => controller.enqueue(chunk));
+            controller.close();
+        },
+    }), { status: 200, headers: { 'content-type': type } });
+}
 
 test('adds a trusted media extension to an extensionless video label', () => {
     assert.equal(sharedFilename({ label: '720p MP4' }, 'video/mp4'), '720p MP4.mp4');
@@ -86,6 +177,225 @@ test('uses Loading without a percentage when stream reading is unavailable', asy
     assert.deepEqual(states, [{ phase: 'loading', percent: null }]);
 });
 
+test('loads prepared MP4s through a native Blob response with real byte progress', async () => {
+    const states = [];
+    const requests = [];
+    const blob = new Blob([new Uint8Array(100)], { type: 'video/mp4' });
+
+    const loaded = await loadPreparedBlob(
+        new URL('https://save.allmy.win/api/share-preparations/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+        100,
+        (state) => states.push(state),
+        {
+            requestFactory: preparedBlobRequest({
+                blob,
+                headers: {
+                    'content-type': 'video/mp4',
+                    'content-disposition': 'attachment; filename="prepared.mp4"',
+                },
+                progress: [0, 27, 27, 15, 100, 101],
+                calls: requests,
+            }),
+        },
+    );
+
+    assert.equal(loaded.blob, blob);
+    assert.equal(loaded.mime, 'video/mp4');
+    assert.equal(loaded.disposition, 'attachment; filename="prepared.mp4"');
+    assert.deepEqual(requests, [{
+        method: 'GET',
+        url: 'https://save.allmy.win/api/share-preparations/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    }]);
+    assert.deepEqual(states, [
+        { phase: 'loading', percent: 0 },
+        { phase: 'loading', percent: 27 },
+        { phase: 'loading', percent: 100 },
+        { phase: 'preparing', stage: 'Finalizing', percent: null },
+    ]);
+});
+
+test('calculates native prepared-media progress for a 30 MB class artifact without allocating it', async () => {
+    const states = [];
+    const size = 30_301_218;
+    const blob = Object.create(Blob.prototype);
+    Object.defineProperties(blob, {
+        size: { value: size },
+        type: { value: 'video/mp4' },
+    });
+
+    await loadPreparedBlob(
+        new URL('https://save.allmy.win/api/share-preparations/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+        size,
+        (state) => states.push(state),
+        {
+            requestFactory: preparedBlobRequest({
+                blob,
+                headers: { 'content-type': 'video/mp4' },
+                progress: [15_150_609, size],
+            }),
+        },
+    );
+
+    assert.deepEqual(states, [
+        { phase: 'loading', percent: 0 },
+        { phase: 'loading', percent: 50 },
+        { phase: 'loading', percent: 100 },
+        { phase: 'preparing', stage: 'Finalizing', percent: null },
+    ]);
+});
+
+for (const failure of ['onerror', 'onabort', 'ontimeout']) {
+test(`rejects prepared-media XHR ${failure} without exposing browser details`, async () => {
+    await assert.rejects(
+        () => loadPreparedBlob(
+            new URL('https://save.allmy.win/api/share-preparations/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+            100,
+            () => {},
+            { requestFactory: preparedBlobRequest({ failure }) },
+        ),
+        (error) => error instanceof ShareMediaError
+            && error.code === 'share_unavailable'
+            && error.message === 'The prepared file could not be loaded for sharing.',
+    );
+});
+}
+
+test('rejects prepared-media size and MIME mismatches before creating a File', async () => {
+    const sizeMismatch = new Blob([new Uint8Array(99)], { type: 'video/mp4' });
+    const invalidMime = new Blob([new Uint8Array(100)], { type: 'text/plain' });
+    const url = new URL('https://save.allmy.win/api/share-preparations/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+
+    await assert.rejects(
+        () => loadPreparedBlob(url, 100, () => {}, {
+            requestFactory: preparedBlobRequest({
+                blob: sizeMismatch,
+                headers: { 'content-type': 'video/mp4' },
+            }),
+        }),
+        ShareMediaError,
+    );
+    await assert.rejects(
+        () => loadPreparedBlob(url, 100, () => {}, {
+            requestFactory: preparedBlobRequest({
+                blob: invalidMime,
+                headers: { 'content-type': 'text/plain' },
+            }),
+        }),
+        ShareMediaError,
+    );
+});
+
+test('streams a prepared MP4 directly into OPFS without retaining response chunks', async () => {
+    const originalFile = globalThis.File;
+    const states = [];
+    const file = new File([new Uint8Array(100)], 'prepared.mp4', { type: 'video/mp4' });
+    const opfs = opfsFixture({ file });
+    globalThis.File = File;
+    try {
+        const stored = await streamPreparedMediaToOpfs(
+            new URL('https://save.allmy.win/api/share-preparations/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+            100,
+            { filename: 'prepared.mp4' },
+            (state) => states.push(state),
+            {
+                storageDirectoryFactory: async () => opfs.root,
+                randomUuid: () => 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+                now: () => 1_700_000_000_000,
+                fetcher: async () => preparedStream([new Uint8Array(10), new Uint8Array(20), new Uint8Array(70)]),
+            },
+        );
+
+        assert.equal(stored.file, file);
+        assert.deepEqual(opfs.writes.map((chunk) => chunk.byteLength), [10, 20, 70]);
+        assert.deepEqual(states, [
+            { phase: 'loading', percent: 0 },
+            { phase: 'loading', percent: 10 },
+            { phase: 'loading', percent: 30 },
+            { phase: 'loading', percent: 100 },
+            { phase: 'preparing', stage: 'Finalizing', percent: null },
+        ]);
+        await stored.cleanup();
+        await stored.cleanup();
+        assert.deepEqual(opfs.removed, ['session-1700000000000-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa']);
+    } finally {
+        globalThis.File = originalFile;
+    }
+});
+
+test('calculates the 30 MB prepared-media progress class without allocating a binary fixture', () => {
+    const size = 30_301_218;
+    assert.equal(transferPercent(0, size), 0);
+    assert.equal(transferPercent(15_150_609, size), 50);
+    assert.equal(transferPercent(size, size), 100);
+    assert.equal(transferPercent(size + 1, size), 100);
+    assert.equal(transferPercent(-1, size), null);
+});
+
+test('cleans only its OPFS session after stream failures without exposing browser errors', async () => {
+    const originalFile = globalThis.File;
+    const file = new File([new Uint8Array(100)], 'prepared.mp4', { type: 'video/mp4' });
+    const opfs = opfsFixture({ file, failWrite: true });
+    globalThis.File = File;
+    try {
+        await assert.rejects(
+            () => streamPreparedMediaToOpfs(
+                new URL('https://save.allmy.win/api/share-preparations/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+                100,
+                { filename: 'prepared.mp4' },
+                () => {},
+                {
+                    storageDirectoryFactory: async () => opfs.root,
+                    randomUuid: () => 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+                    now: () => 1_700_000_000_000,
+                    fetcher: async () => preparedStream([new Uint8Array(100)]),
+                },
+            ),
+            (error) => error instanceof ShareMediaError && error.message === 'The prepared file could not be loaded for sharing.',
+        );
+        assert.deepEqual(opfs.removed, ['session-1700000000000-cccccccc-cccc-cccc-cccc-cccccccccccc']);
+    } finally {
+        globalThis.File = originalFile;
+    }
+});
+
+test('removes only stale Save It OPFS sessions and leaves unrelated entries alone', async () => {
+    const originalFile = globalThis.File;
+    const now = 1_700_000_000_000;
+    const file = new File([new Uint8Array(100)], 'prepared.mp4', { type: 'video/mp4' });
+    const old = `session-${now - (25 * 60 * 60 * 1000)}-eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee`;
+    const fresh = `session-${now - (60 * 60 * 1000)}-ffffffff-ffff-ffff-ffff-ffffffffffff`;
+    const opfs = opfsFixture({
+        file,
+        entries: [
+            [old, { kind: 'directory' }],
+            [fresh, { kind: 'directory' }],
+            ['unrelated-data', { kind: 'directory' }],
+        ],
+    });
+    globalThis.File = File;
+    try {
+        const stored = await streamPreparedMediaToOpfs(
+            new URL('https://save.allmy.win/api/share-preparations/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+            100,
+            { filename: 'prepared.mp4' },
+            () => {},
+            {
+                storageDirectoryFactory: async () => opfs.root,
+                randomUuid: () => '11111111-1111-1111-1111-111111111111',
+                now: () => now,
+                fetcher: async () => preparedStream([new Uint8Array(100)]),
+            },
+        );
+        await stored.cleanup();
+        assert.deepEqual(opfs.removed, [
+            old,
+            'session-1700000000000-11111111-1111-1111-1111-111111111111',
+        ]);
+    } finally {
+        globalThis.File = originalFile;
+    }
+});
+
 test('prepares an MP4 without opening the share sheet, then opens it without refetching', async () => {
     const originalFetch = globalThis.fetch;
     const originalNavigator = globalThis.navigator;
@@ -93,6 +403,7 @@ test('prepares an MP4 without opening the share sheet, then opens it without ref
     const originalWindow = globalThis.window;
     const states = [];
     const calls = [];
+    const opfs = opfsFixture({ file: new File([new Uint8Array(100)], 'prepared.mp4', { type: 'video/mp4' }) });
     let shareCalls = 0;
 
     globalThis.File = File;
@@ -111,41 +422,61 @@ test('prepares an MP4 without opening the share sheet, then opens it without ref
         calls.push([url instanceof URL ? url.pathname : url, options]);
         if (calls.length === 1) {
             return new Response(JSON.stringify({ data: {
-                url: '/api/share-preparations/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-                mime_type: 'video/mp4',
-                filename: 'prepared.mp4',
-            } }), { status: 200, headers: { 'content-type': 'application/json' } });
+                status_url: '/api/share-preparation-jobs/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            } }), { status: 202, headers: { 'content-type': 'application/json' } });
         }
         if (calls.length === 2) {
+            return new Response(JSON.stringify({ data: {
+                status: 'processing', stage: 'Converting', progress: 42,
+            } }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        if (calls.length === 3) {
+            return new Response(JSON.stringify({ data: {
+                status: 'ready', url: '/api/share-preparations/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                mime_type: 'video/mp4', filename: 'prepared.mp4', progress: 100,
+            } }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        if (calls.length === 4) {
             return new Response(new Uint8Array([0]), {
                 status: 206,
                 headers: { 'content-range': 'bytes 0-0/100' },
             });
         }
-        return new Response(new ReadableStream({
-            start(controller) {
-                controller.enqueue(new Uint8Array(27));
-                controller.enqueue(new Uint8Array(73));
-                controller.close();
-            },
-        }), { headers: { 'content-type': 'video/mp4' } });
+        if (calls.length === 5) {
+            return preparedStream([new Uint8Array(27), new Uint8Array(73)]);
+        }
+        throw new Error('Unexpected prepared-media request.');
     };
 
     try {
-        const prepared = await prepareShareMedia({
+        const session = createShareSession({
             delivery: 'proxy',
             download_url: '/api/downloads/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
             mime_type: 'video/mp4',
             label: 'Video',
             share: share(true, 82_036_850),
-        }, (state) => states.push(state));
+        }, {
+            onState: (state) => states.push(state),
+            prepare: (output, onState) => prepareShareMedia(output, onState, {
+            pollIntervalMs: 0,
+            sleep: async () => {},
+            storageDirectoryFactory: async () => opfs.root,
+            randomUuid: () => 'dddddddd-dddd-dddd-dddd-dddddddddddd',
+            now: () => 1_700_000_000_000,
+            }),
+        });
+        await session.activate();
 
         assert.equal(shareCalls, 0);
-        assert.equal(prepared.file instanceof File, true);
-        assert.equal(calls.length, 3);
-        const opening = openShareSheet(prepared);
+        assert.equal(session.phase, 'ready');
+        assert.equal(session.prepared.file instanceof File, true);
+        assert.equal(calls.length, 5);
+        const opening = session.activate();
         assert.equal(shareCalls, 1);
         await opening;
+        assert.equal(calls.length, 5);
+        assert.deepEqual(opfs.writes.map((chunk) => chunk.byteLength), [27, 73]);
+        assert.deepEqual(opfs.removed, ['session-1700000000000-dddddddd-dddd-dddd-dddd-dddddddddddd']);
     } finally {
         globalThis.fetch = originalFetch;
         globalThis.File = originalFile;
@@ -155,11 +486,16 @@ test('prepares an MP4 without opening the share sheet, then opens it without ref
 
     assert.equal(calls.filter(([url]) => url === '/api/share-preparations').length, 1);
     assert.deepEqual(states, [
-        { phase: 'preparing' },
+        { phase: 'preparing', stage: 'Queued', percent: null },
+        { phase: 'preparing', stage: 'Converting', percent: 42 },
         { phase: 'loading', percent: null },
         { phase: 'loading', percent: 0 },
         { phase: 'loading', percent: 27 },
         { phase: 'loading', percent: 100 },
+        { phase: 'preparing', stage: 'Finalizing', percent: null },
+        { phase: 'ready' },
+        { phase: 'sharing' },
+        { phase: 'idle' },
     ]);
 });
 

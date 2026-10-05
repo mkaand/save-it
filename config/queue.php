@@ -68,7 +68,13 @@ return [
             'driver' => 'redis',
             'connection' => env('REDIS_QUEUE_CONNECTION', 'default'),
             'queue' => env('REDIS_QUEUE', 'default'),
-            'retry_after' => (int) env('REDIS_QUEUE_RETRY_AFTER', 90),
+            // A reservation must always outlive the longest worker job. An
+            // old environment override cannot make a long media job visible
+            // for duplicate reservation before its worker has stopped it.
+            'retry_after' => max(
+                (int) env('REDIS_QUEUE_RETRY_AFTER', 960),
+                (int) env('DOWNLOAD_JOB_TIMEOUT_SECONDS', 900) + 60,
+            ),
             'block_for' => null,
             'after_commit' => false,
         ],

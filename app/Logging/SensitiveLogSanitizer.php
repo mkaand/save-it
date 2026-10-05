@@ -38,7 +38,7 @@ final class SensitiveLogSanitizer
     {
         $value = preg_replace('/(Authorization|Cookie)\s*[:=].*$/i', '$1: [REDACTED]', $value) ?? $value;
         $value = preg_replace('/([?&](?:token|sig|signature|expires|st|se|sp|api[_-]?key)=[^&#\s]+)/i', '$1[REDACTED]', $value) ?? $value;
-        $value = preg_replace('/\/api\/(?:downloads|share-preparations)\/[a-z0-9]{48}(?:\.[a-f0-9]{64})?/i', '/api/[REDACTED]', $value) ?? $value;
+        $value = preg_replace('/\/api\/(?:downloads|share-preparations|share-preparation-jobs)\/[a-z0-9]{48}(?:\.[a-f0-9]{64})?/i', '/api/[REDACTED]', $value) ?? $value;
 
         return $value;
     }

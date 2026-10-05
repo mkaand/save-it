@@ -3,6 +3,7 @@
 namespace App\Services\Downloads;
 
 use Illuminate\Support\Facades\File;
+use Symfony\Component\Process\Process;
 
 final class ShareMediaPreparationService
 {
@@ -14,9 +15,19 @@ final class ShareMediaPreparationService
     ) {}
 
     /** @return array{id: string, filename: string, provider: string} */
-    public function prepare(string $token): array
+    public function prepare(string $token, ?callable $onState = null): array
     {
-        $asset = $this->downloads->resolve($token);
+        return $this->prepareAsset($this->downloads->resolve($token), $onState);
+    }
+
+    /**
+     * @param  array<string, mixed>  $asset
+     * @param  (callable(string, ?int): void)|null  $onState
+     * @return array{id: string, filename: string, provider: string}
+     */
+    public function prepareAsset(array $asset, ?callable $onState = null): array
+    {
+        $onState ??= static function (): void {};
         if (($asset['mode'] ?? null) === 'youtube_direct') {
             $asset = $this->youtube->resolve($asset);
         }
@@ -33,6 +44,7 @@ final class ShareMediaPreparationService
         $output = $work.'/prepared.mp4';
 
         try {
+            $onState('Downloading', null);
             if (($asset['mode'] ?? null) === 'local_file') {
                 $this->copyLocalSource($asset, $input, $limit);
             } elseif (($asset['mode'] ?? null) === 'proxy' || ($asset['mode'] ?? null) === 'youtube_direct') {
@@ -41,11 +53,12 @@ final class ShareMediaPreparationService
                 throw new DownloadException('share_unavailable', 422, 'This file cannot be prepared for sharing.');
             }
 
-            $this->remux($input, $output, $limit);
+            $this->remux($input, $output, ($asset['provider'] ?? null) === 'facebook', $onState);
             $size = filesize($output);
             if (! is_int($size) || $size < 1 || $size > $limit) {
                 throw new DownloadException('share_unavailable', 422, 'This file cannot be prepared for sharing.');
             }
+            $onState('Finalizing', null);
             $id = strtolower(bin2hex(random_bytes(24)));
             $path = $directory.DIRECTORY_SEPARATOR.$id.'.mp4';
             if (! rename($output, $path)) {
@@ -76,32 +89,115 @@ final class ShareMediaPreparationService
         chmod($destination, 0600);
     }
 
-    private function remux(string $input, string $output, int $limit): void
+    /** @param callable(string, ?int): void $onState */
+    private function remux(string $input, string $output, bool $facebook, callable $onState): void
     {
-        $command = [
+        $onState('Inspecting', null);
+        $this->run([
             (string) config('services.downloads.share_ffmpeg_binary'),
-            '-nostdin', '-hide_banner', '-loglevel', 'error', '-y',
-            '-i', $input,
-            '-map', '0:v?', '-map', '0:a?',
-            '-map_metadata', '-1', '-map_chapters', '-1',
-            '-c', 'copy',
-            '-movflags', '+faststart',
-            $output,
-        ];
-        $descriptors = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
-        $pipes = [];
-        $process = proc_open($command, $descriptors, $pipes, null, [], ['bypass_shell' => true]);
-        if (! is_resource($process)) {
-            throw new DownloadException('share_unavailable', 503, 'The file could not be prepared for sharing.');
-        }
-        fclose($pipes[0]);
-        $stderr = stream_get_contents($pipes[2], 65_536);
-        fclose($pipes[1]);
-        fclose($pipes[2]);
-        $exitCode = proc_close($process);
-        if ($exitCode !== 0 || ! is_file($output)) {
+            '-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-i', $input,
+            '-map', '0:v?', '-map', '0:a?', '-map_metadata', '-1', '-map_chapters', '-1',
+            '-c', 'copy', '-movflags', '+faststart', $output,
+        ]);
+        if (! is_file($output)) {
             throw new DownloadException('share_unavailable', 422, 'This file cannot be prepared for sharing.');
         }
+        if (! $facebook) {
+            return;
+        }
+        $details = $this->videoDetails($output);
+        if ($details['compatible']) {
+            return;
+        }
+        $compatible = dirname($output).'/ios-compatible.mp4';
+        $this->transcodeForIos($output, $compatible, $details['duration'], $onState);
+        if (! rename($compatible, $output)) {
+            throw new DownloadException('share_unavailable', 503, 'The file could not be prepared for sharing.');
+        }
+    }
+
+    /** @return array{compatible: bool, duration: float|null} */
+    private function videoDetails(string $path): array
+    {
+        $stdout = $this->run([
+            (string) config('services.downloads.share_ffprobe_binary'),
+            '-v', 'error', '-show_entries', 'stream=codec_name,pix_fmt:format=duration', '-of', 'json', $path,
+        ]);
+        $probe = json_decode($stdout, true);
+        $stream = is_array($probe) ? ($probe['streams'][0] ?? null) : null;
+        $format = is_array($probe) ? ($probe['format'] ?? null) : null;
+        $duration = is_array($format) && is_numeric($format['duration'] ?? null) && (float) $format['duration'] > 0
+            ? (float) $format['duration']
+            : null;
+
+        return [
+            'compatible' => is_array($stream)
+                && ($stream['codec_name'] ?? null) === 'h264'
+                && ($stream['pix_fmt'] ?? null) === 'yuv420p',
+            'duration' => $duration,
+        ];
+    }
+
+    /** @param callable(string, ?int): void $onState */
+    private function transcodeForIos(string $input, string $output, ?float $duration, callable $onState): void
+    {
+        $onState('Converting', $duration === null ? null : 0);
+        $buffer = '';
+        $last = -1;
+        $this->run([
+            (string) config('services.downloads.share_ffmpeg_binary'),
+            '-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-i', $input,
+            '-map', '0:v:0', '-map', '0:a?', '-map_metadata', '-1', '-map_chapters', '-1',
+            '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
+            '-c:a', 'copy', '-movflags', '+faststart', '-progress', 'pipe:1', '-nostats', $output,
+        ], function (string $type, string $data) use (&$buffer, &$last, $duration, $onState): void {
+            if ($type !== Process::OUT) {
+                return;
+            }
+            $buffer .= $data;
+            while (($position = strpos($buffer, "\n")) !== false) {
+                $line = trim(substr($buffer, 0, $position));
+                $buffer = substr($buffer, $position + 1);
+                $progress = self::conversionProgressFromLine($line, $duration);
+                if ($progress !== null && $progress > $last) {
+                    $last = $progress;
+                    $onState('Converting', $progress);
+                }
+            }
+        });
+        if (! is_file($output)) {
+            throw new DownloadException('share_unavailable', 422, 'This file cannot be prepared for sharing.');
+        }
+    }
+
+    public static function conversionProgressFromLine(string $line, ?float $duration): ?int
+    {
+        if ($duration === null || $duration <= 0 || preg_match('/^out_time_(?:us|ms)=([0-9]+)$/', $line, $matches) !== 1) {
+            return null;
+        }
+
+        // FFmpeg's historic out_time_ms field is expressed in microseconds.
+        return min(99, max(0, (int) floor(((int) $matches[1] / 1_000_000) / $duration * 100)));
+    }
+
+    /** @param array<int, string> $command */
+    private function run(array $command, ?callable $onOutput = null): string
+    {
+        try {
+            $process = new Process($command);
+            // Finish/terminate FFmpeg before Laravel's worker timeout so the
+            // child is not left behind if the worker is recycled.
+            $process->setTimeout(max(30, (int) config('services.downloads.job_timeout_seconds') - 15));
+            $process->setIdleTimeout(null);
+            $process->run($onOutput);
+        } catch (\Throwable) {
+            throw new DownloadException('share_unavailable', 503, 'The file could not be prepared for sharing.');
+        }
+        if (! $process->isSuccessful()) {
+            throw new DownloadException('share_unavailable', 422, 'This file cannot be prepared for sharing.');
+        }
+
+        return $process->getOutput();
     }
 
     /** @param array<string, mixed> $asset */

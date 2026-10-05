@@ -605,6 +605,21 @@ class ExtractorClientTest extends TestCase
         $this->postJson('/api/download-jobs', ['token' => $response->json('data.outputs.0.job_token')])->assertStatus(202);
     }
 
+    public function test_facebook_long_post_canonical_url_is_accepted_without_relaxing_the_contract(): void
+    {
+        Http::fake(function (Request $request) {
+            $payload = $this->facebookSuccessResponse($request->data()['request_id']);
+            $payload['data']['provider_variant'] = 'video';
+            $payload['data']['normalized_url'] = 'https://www.facebook.com/xnoteai/posts/long-%F0%9F%8C%8D-caption/122348022950024397/';
+
+            return Http::response($payload);
+        });
+
+        $this->postJson('/api/analyze', [
+            'url' => 'https://www.facebook.com/xnoteai/posts/long-%F0%9F%8C%8D-caption/122348022950024397/',
+        ])->assertOk()->assertJsonPath('data.platform', 'facebook');
+    }
+
     public function test_linkedin_extraction_accepts_a_long_percent_encoded_canonical_post_url(): void
     {
         $canonicalUrl = 'https://www.linkedin.com/posts/istanbul-sensorler_panasonicindustry-hgt1010-%C3%B6l%C3%A7%C3%BCmsens%C3%B6r%C3%BC-activity-7487771630123769856-Te6v/';
