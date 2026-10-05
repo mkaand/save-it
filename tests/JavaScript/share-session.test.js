@@ -71,6 +71,36 @@ test('ready activation opens synchronously without a second preparation and igno
     assert.equal(session.prepared, null);
 });
 
+test('a Web Share promise that never settles recovers from Opening for a retry', async () => {
+    let recover;
+    let cancelled = 0;
+    const states = [];
+    const session = createShareSession({}, {
+        onState: ({ phase }) => states.push(phase),
+        prepare: async () => ({ file: {}, title: 'Media' }),
+        open: () => new Promise(() => {}),
+        schedule: (callback) => {
+            recover = callback;
+            return 'timer';
+        },
+        cancel: (timer) => {
+            assert.equal(timer, 'timer');
+            cancelled += 1;
+        },
+    });
+
+    await session.activate();
+    const opening = session.activate();
+    assert.equal(session.phase, 'sharing');
+    recover();
+    await opening;
+
+    assert.equal(session.phase, 'idle');
+    assert.equal(session.prepared, null);
+    assert.equal(cancelled, 1);
+    assert.deepEqual(states, ['ready', 'sharing', 'idle']);
+});
+
 test('AbortError and NotAllowedError preserve the prepared file for retry without refetching', async () => {
     const errors = [];
     let prepareCalls = 0;

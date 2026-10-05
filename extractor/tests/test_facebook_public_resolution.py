@@ -162,6 +162,39 @@ def test_fbwatch_uses_tokenless_oembed_and_never_imports_cookies(public_dns):
     assert result.url == TARGET
 
 
+def test_direct_video_login_redirect_uses_identity_bound_tokenless_oembed(public_dns):
+    source = "https://www.facebook.com/video.php?v=" + VIDEO_ID
+
+    def handle(request):
+        if request.url.host == "graph.facebook.com":
+            assert request.url.params["url"] == source
+            return httpx.Response(200, json=oembed(), headers={"content-type": "application/json"})
+        if request.url.path == "/video.php":
+            return httpx.Response(302, headers={"location": "/login/?next=ignored"})
+        assert str(request.url) == TARGET
+        return httpx.Response(200, headers={"content-type": "text/html"}, text=page())
+
+    result = asyncio.run(FacebookMetadataClient(httpx.MockTransport(handle)).fetch_page(source))
+    assert result.url == TARGET
+
+
+def test_direct_video_login_oembed_must_preserve_the_expected_video_identity(public_dns):
+    source = "https://www.facebook.com/video.php?v=" + VIDEO_ID
+
+    def handle(request):
+        if request.url.host == "graph.facebook.com":
+            return httpx.Response(
+                200,
+                json=oembed("https://www.facebook.com/reel/999999999999999"),
+                headers={"content-type": "application/json"},
+            )
+        return httpx.Response(302, headers={"location": "/login/?next=ignored"})
+
+    with pytest.raises(ProviderError) as error:
+        asyncio.run(FacebookMetadataClient(httpx.MockTransport(handle)).fetch_page(source))
+    assert error.value.code == "provider_response_changed"
+
+
 @pytest.mark.parametrize(
     "target",
     [

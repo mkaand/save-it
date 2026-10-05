@@ -44,6 +44,7 @@ class ShareMediaPreparationTest extends TestCase
 
         $token = $this->app->make(DownloadAssetStore::class)->issue([
             'mode' => 'local_file',
+            'provider' => 'facebook',
             'path' => $source,
             'filename' => 'Rick Astley.mp4',
             'mime_type' => 'video/mp4',
@@ -75,6 +76,38 @@ class ShareMediaPreparationTest extends TestCase
             ->assertHeader('Content-Type', 'video/mp4')
             ->assertHeader('Content-Range', 'bytes 0-0/'.filesize($prepared['path']))
             ->assertHeader('Content-Length', '1');
+    }
+
+    public function test_facebook_vp9_share_preparation_transcodes_only_the_prepared_copy_to_ios_compatible_h264(): void
+    {
+        if (! is_executable('/usr/bin/ffmpeg') || ! is_executable('/usr/bin/ffprobe')) {
+            $this->markTestSkipped('FFmpeg integration coverage runs in the Docker validation image.');
+        }
+        $source = storage_path('app/private/downloads/facebook-vp9-'.bin2hex(random_bytes(4)).'.mp4');
+        File::ensureDirectoryExists(dirname($source), 0700, true);
+        $this->command([
+            '/usr/bin/ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-y',
+            '-f', 'lavfi', '-i', 'testsrc=size=64x64:rate=25',
+            '-f', 'lavfi', '-i', 'sine=frequency=1000:sample_rate=44100',
+            '-t', '1', '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'libvpx-vp9', '-c:a', 'aac',
+            '-movflags', '+faststart', $source,
+        ]);
+        $this->paths[] = $source;
+        $this->assertSame('vp9', $this->probe($source)['streams'][0]['codec_name']);
+
+        $token = $this->app->make(DownloadAssetStore::class)->issue([
+            'mode' => 'local_file', 'provider' => 'facebook', 'path' => $source,
+            'filename' => 'Facebook.mp4', 'mime_type' => 'video/mp4',
+        ]);
+        $response = $this->postJson('/api/share-preparations', ['token' => $token])->assertOk();
+        $prepared = $this->app->make(ShareMediaPreparationStore::class)->resolve(basename((string) $response->json('data.url')));
+        $this->assertNotNull($prepared);
+        $this->paths[] = $prepared['path'];
+        $probe = $this->probe($prepared['path']);
+        $this->assertSame('h264', $probe['streams'][0]['codec_name']);
+        $this->assertSame('yuv420p', $probe['streams'][0]['pix_fmt']);
+        $this->assertSame('audio', $probe['streams'][1]['codec_type']);
+        $this->assertSame('vp9', $this->probe($source)['streams'][0]['codec_name']);
     }
 
     public function test_share_preparation_is_bounded_and_expired_files_are_cleaned_up(): void
@@ -202,7 +235,7 @@ class ShareMediaPreparationTest extends TestCase
             '/usr/bin/ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-y',
             '-f', 'lavfi', '-i', 'testsrc=size=64x64:rate=25',
             '-f', 'lavfi', '-i', 'sine=frequency=1000:sample_rate=44100',
-            '-t', '1', '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'libx264', '-c:a', 'aac',
+            '-t', '1', '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac',
             '-metadata', 'creation_time=2025-12-28T21:03:51Z',
             '-metadata:s:v:0', 'creation_time=2025-12-28T21:03:51Z',
             '-metadata:s:a:0', 'creation_time=2025-12-28T21:03:51Z',

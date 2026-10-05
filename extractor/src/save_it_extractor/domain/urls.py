@@ -353,7 +353,10 @@ def _normalize_facebook_url(hostname: str, parsed: SplitResult) -> str:
 
     post = re.fullmatch(r"^/[A-Za-z0-9._-]{1,100}/posts/(?:[^/]+/)?([0-9]{10,30})/?$", parsed.path)
     if post is not None:
-        return f"https://www.facebook.com{parsed.path.rstrip('/')}/"
+        # Long, localized captions are presentation-only path segments. Keep
+        # only the page handle and terminal story identity for retrieval.
+        owner = parsed.path.split("/", 2)[1]
+        return f"https://www.facebook.com/{owner}/posts/{post.group(1)}/"
 
     raise UrlValidationError(
         "invalid_facebook_media_url", "Facebook supports public video and Reel URLs only."

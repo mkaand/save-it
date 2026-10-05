@@ -10,6 +10,9 @@ export function createShareSession(output, {
     onState = () => {},
     open = openShareSheet,
     prepare = prepareShareMedia,
+    schedule = globalThis.setTimeout,
+    cancel = globalThis.clearTimeout,
+    shareSettlementTimeoutMs = 45_000,
 } = {}) {
     let generation = 0;
     let phase = 'idle';
@@ -52,11 +55,21 @@ export function createShareSession(output, {
                 return Promise.resolve();
             }
 
-            return Promise.resolve(opening).then(() => {
+            // iOS can leave a Web Share promise pending after the system
+            // sheet hands off to Photos. The prepared artifact remains private
+            // server-side; recover this button deterministically for retry.
+            let recoveryTimer;
+            const recovery = new Promise((resolve) => {
+                recoveryTimer = schedule(resolve, shareSettlementTimeoutMs);
+            });
+
+            return Promise.race([Promise.resolve(opening), recovery]).then(() => {
+                cancel(recoveryTimer);
                 prepared = null;
                 phase = 'idle';
                 publish();
             }).catch((error) => {
+                cancel(recoveryTimer);
                 phase = 'ready';
                 publish();
                 const message = shareErrorMessage(error);

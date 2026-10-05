@@ -1101,6 +1101,7 @@ summary:focus-visible {
 
 .output-actions {
     display: flex;
+    align-items: stretch;
     width: 100%;
     min-width: 0;
     gap: 0.42rem;
@@ -1143,6 +1144,10 @@ summary:focus-visible {
 }
 
 .output-actions .output-share {
+    align-self: stretch;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     flex: 0 0 auto;
 }
 
