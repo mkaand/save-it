@@ -139,6 +139,9 @@ export async function responseBlob(response, size, onState = () => {}, maximum =
     const maximumSize = Number.isSafeInteger(maximum) && maximum > 0 ? maximum : null;
 
     if (!reader) {
+        if (knownSize === null && maximumSize !== null) {
+            throw new ShareMediaError('share_unavailable', 'The file could not be prepared for sharing.');
+        }
         onState({ phase: 'loading', percent: null });
         return response.blob();
     }
@@ -155,6 +158,7 @@ export async function responseBlob(response, size, onState = () => {}, maximum =
         }
 
         if (maximumSize !== null && received + value.byteLength > maximumSize) {
+            await reader.cancel().catch(() => {});
             throw new ShareMediaError('media_too_large', 'Download only · Too large for Share / Save');
         }
         chunks.push(value);
@@ -463,6 +467,7 @@ export async function prepareShareMedia(output, onState = () => {}, {
     let mime;
     let disposition = null;
     let cleanup = null;
+    let transferSize = knownSize;
     if (video) {
         const stored = await streamVideoToOpfs(url, knownSize, output, onState, {
             mime: expectedMime,
@@ -493,11 +498,28 @@ export async function prepareShareMedia(output, onState = () => {}, {
         if (!response.ok) {
             throw new ShareMediaError('share_unavailable', 'The file could not be prepared for sharing.');
         }
-        blob = await responseBlob(response, knownSize, onState, maximum);
+        if (image) {
+            // Instagram can serve different image representations for Range
+            // and full GET requests. Validate this body against its own length,
+            // never the earlier probe's representation size.
+            const fullLength = response.headers.get('content-length');
+            const fullMime = mediaType(response.headers.get('content-type'));
+            transferSize = fullLength === null ? null : Number(fullLength);
+            if (response.status !== 200 || !fullMime?.startsWith('image/')
+                || (fullLength !== null && (!/^[0-9]+$/.test(fullLength) || !Number.isSafeInteger(transferSize) || transferSize < 1))) {
+                await response.body?.cancel();
+                throw new ShareMediaError('share_unavailable', 'The file could not be prepared for sharing.');
+            }
+            if (transferSize !== null && transferSize > maximum) {
+                await response.body?.cancel();
+                throw new ShareMediaError('media_too_large', 'Download only · Too large for Share / Save');
+            }
+        }
+        blob = await responseBlob(response, transferSize, onState, maximum);
         mime = mediaType(response.headers.get('content-type')) || mediaType(blob.type);
         disposition = response.headers.get('content-disposition');
     }
-    if ((knownSize !== null && blob.size !== knownSize) || blob.size > maximum || !mime) {
+    if ((transferSize !== null && blob.size !== transferSize) || blob.size < 1 || blob.size > maximum || !mime) {
         throw new ShareMediaError('share_unavailable', 'The file could not be prepared for sharing.');
     }
     let file;
