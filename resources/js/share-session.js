@@ -17,14 +17,26 @@ export function createShareSession(output, {
     let generation = 0;
     let phase = 'idle';
     let prepared = null;
+    let releasedPrepared = null;
     let preparing = false;
 
     function publish(state = { phase }) {
         onState(state);
     }
 
+    function cleanupPrepared(value) {
+        return Promise.resolve(value?.cleanup?.()).catch(() => {});
+    }
+
     function release() {
         generation += 1;
+        if (prepared) {
+            if (phase === 'sharing') {
+                releasedPrepared = prepared;
+            } else {
+                cleanupPrepared(prepared);
+            }
+        }
         prepared = null;
         if (phase !== 'sharing') {
             phase = 'idle';
@@ -60,17 +72,35 @@ export function createShareSession(output, {
             // server-side; recover this button deterministically for retry.
             let recoveryTimer;
             const recovery = new Promise((resolve) => {
-                recoveryTimer = schedule(resolve, shareSettlementTimeoutMs);
+                recoveryTimer = schedule(() => resolve({ recovered: true }), shareSettlementTimeoutMs);
             });
 
-            return Promise.race([Promise.resolve(opening), recovery]).then(() => {
+            return Promise.race([Promise.resolve(opening).then(() => ({ recovered: false })), recovery]).then(async ({ recovered }) => {
                 cancel(recoveryTimer);
-                prepared = null;
-                phase = 'idle';
+                if (releasedPrepared) {
+                    await cleanupPrepared(releasedPrepared);
+                    releasedPrepared = null;
+                    phase = 'idle';
+                } else if (recovered) {
+                    phase = 'ready';
+                } else {
+                    const completed = prepared;
+                    prepared = null;
+                    await cleanupPrepared(completed);
+                    phase = 'idle';
+                }
                 publish();
-            }).catch((error) => {
+            }).catch(async (error) => {
                 cancel(recoveryTimer);
-                phase = 'ready';
+                if (releasedPrepared) {
+                    await cleanupPrepared(releasedPrepared);
+                    releasedPrepared = null;
+                    phase = 'idle';
+                    publish();
+
+                    return;
+                }
+                phase = prepared ? 'ready' : 'idle';
                 publish();
                 const message = shareErrorMessage(error);
                 if (message) {
@@ -90,6 +120,7 @@ export function createShareSession(output, {
             publish(state);
         })).then((result) => {
             if (currentGeneration !== generation) {
+                cleanupPrepared(result);
                 return;
             }
 
