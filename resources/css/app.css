@@ -1151,6 +1151,29 @@ summary:focus-visible {
     flex: 0 0 auto;
 }
 
+.output-share-wrap {
+    align-self: stretch;
+    display: flex;
+    min-width: 7.9rem;
+    flex: 0 0 auto;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.2rem;
+}
+
+.output-share-progress-label {
+    color: var(--text-muted);
+    font-size: 0.62rem;
+    line-height: 1.2;
+    text-align: center;
+}
+
+.output-share-progress {
+    width: 100%;
+    height: 0.28rem;
+    accent-color: var(--accent);
+}
+
 .output-option:disabled {
     cursor: not-allowed;
     opacity: 0.62;

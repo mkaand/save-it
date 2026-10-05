@@ -456,10 +456,16 @@ export function initAnalyzer() {
             actions.append(button);
             if (canOfferMobileShare(output)) {
                 const share = element('button', 'output-share', 'Share / Save');
+                const shareWrap = element('div', 'output-share-wrap');
+                const shareProgress = element('progress', 'output-share-progress');
+                const shareProgressLabel = element('span', 'output-share-progress-label');
                 share.type = 'button';
                 share.setAttribute('aria-live', 'polite');
                 share.setAttribute('aria-label', `Share or save ${output.label}`);
-                const setShareState = ({ phase, percent = null } = {}) => {
+                shareProgress.max = 100;
+                shareProgress.hidden = true;
+                shareProgressLabel.hidden = true;
+                const setShareState = ({ phase, stage = null, percent = null } = {}) => {
                     const loading = phase === 'preparing' || phase === 'loading';
                     const sharing = phase === 'sharing';
                     const label = shareStateLabel(phase, percent);
@@ -468,6 +474,19 @@ export function initAnalyzer() {
                     share.disabled = loading || sharing;
                     share.classList.toggle('is-loading', loading || sharing);
                     share.setAttribute('aria-label', shareStateAriaLabel(phase, label, output.label));
+                    const hasProgress = phase === 'preparing' || phase === 'loading';
+                    shareProgress.hidden = !hasProgress;
+                    shareProgressLabel.hidden = !hasProgress;
+                    if (!hasProgress) {
+                        shareProgress.removeAttribute('value');
+                        shareProgressLabel.textContent = '';
+                    } else if (Number.isInteger(percent)) {
+                        shareProgress.value = percent;
+                        shareProgressLabel.textContent = `${stage || (phase === 'loading' ? 'Loading' : 'Preparing')} · ${percent}%`;
+                    } else {
+                        shareProgress.removeAttribute('value');
+                        shareProgressLabel.textContent = stage || (phase === 'loading' ? 'Loading…' : 'Preparing…');
+                    }
                 };
 
                 const markDownloadOnly = (shareError) => {
@@ -500,7 +519,8 @@ export function initAnalyzer() {
                     // activate() calls openShareSheet() synchronously when ready.
                     shareSession.activate();
                 });
-                actions.append(share);
+                shareWrap.append(share, shareProgressLabel, shareProgress);
+                actions.append(shareWrap);
             } else if (output?.share?.eligible === false && output?.share?.reason === 'too_large') {
                 actions.append(element('p', 'output-share-notice', 'Download only · Too large for Share / Save'));
             }

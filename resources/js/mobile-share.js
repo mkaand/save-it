@@ -53,6 +53,17 @@ function sameOriginPreparationUrl(value) {
     }
 }
 
+function sameOriginPreparationStatusUrl(value) {
+    try {
+        const url = new URL(value, window.location.origin);
+        return url.origin === window.location.origin && /^\/api\/share-preparation-jobs\/[a-z0-9]{48}$/.test(url.pathname)
+            ? url
+            : null;
+    } catch {
+        return null;
+    }
+}
+
 export function canOfferMobileShare(output) {
     return Boolean(
         window.matchMedia?.('(pointer: coarse)').matches
@@ -150,7 +161,42 @@ export async function responseBlob(response, size, onState = () => {}) {
     return new Blob(chunks, { type: response.headers.get('content-type') || '' });
 }
 
-export async function prepareShareMedia(output, onState = () => {}) {
+const pause = (milliseconds) => new Promise((resolve) => globalThis.setTimeout(resolve, milliseconds));
+
+async function preparedMediaFromJob(statusUrl, onState, { pollIntervalMs, sleep }) {
+    while (true) {
+        const response = await fetch(statusUrl, { headers: { Accept: 'application/json' } });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) {
+            throw preparationError(response, payload);
+        }
+        const state = payload?.data;
+        if (!['queued', 'processing', 'ready', 'failed'].includes(state?.status)) {
+            throw new ShareMediaError('share_unavailable', 'The file could not be prepared for sharing.', response.status);
+        }
+        if (state.status === 'failed') {
+            throw preparationError(response, { error: state.error });
+        }
+        if (state.status === 'ready') {
+            const url = sameOriginPreparationUrl(state.url);
+            if (!url || state.mime_type !== 'video/mp4' || typeof state.filename !== 'string') {
+                throw new ShareMediaError('share_unavailable', 'The file could not be prepared for sharing.', response.status);
+            }
+
+            return { url, filename: state.filename, mime_type: state.mime_type };
+        }
+        const percent = Number.isInteger(state.progress) && state.progress >= 0 && state.progress <= 100
+            ? state.progress
+            : null;
+        onState({ phase: 'preparing', stage: typeof state.stage === 'string' ? state.stage : 'Preparing', percent });
+        await sleep(pollIntervalMs);
+    }
+}
+
+export async function prepareShareMedia(output, onState = () => {}, {
+    pollIntervalMs = 1000,
+    sleep = pause,
+} = {}) {
     if (output?.share?.eligible === false) {
         throw new ShareMediaError('media_too_large', 'Download only · Too large for Share / Save');
     }
@@ -163,7 +209,7 @@ export async function prepareShareMedia(output, onState = () => {}) {
         throw new Error('This file is no longer available. Analyze the URL again.');
     }
     if (mediaType(output?.mime_type) === 'video/mp4') {
-        onState({ phase: 'preparing' });
+        onState({ phase: 'preparing', stage: 'Queued', percent: null });
         const token = tokenFromDelivery(url);
         if (!token) {
             throw new Error('This file is no longer available. Analyze the URL again.');
@@ -174,15 +220,16 @@ export async function prepareShareMedia(output, onState = () => {}) {
             body: JSON.stringify({ token }),
         });
         const data = await preparation.json().catch(() => null);
-        const preparedUrl = sameOriginPreparationUrl(data?.data?.url);
-        if (!preparation.ok) {
+        const statusUrl = sameOriginPreparationStatusUrl(data?.data?.status_url);
+        if (!preparation.ok || preparation.status !== 202) {
             throw preparationError(preparation, data);
         }
-        if (!preparedUrl || data?.data?.mime_type !== 'video/mp4') {
+        if (!statusUrl) {
             throw new ShareMediaError('share_unavailable', 'The file could not be prepared for sharing.', preparation.status);
         }
-        url = preparedUrl;
-        output = { ...output, filename: data.data.filename, mime_type: data.data.mime_type };
+        const prepared = await preparedMediaFromJob(statusUrl, onState, { pollIntervalMs, sleep });
+        url = prepared.url;
+        output = { ...output, filename: prepared.filename, mime_type: prepared.mime_type };
     }
     onState({ phase: 'loading', percent: null });
     const probe = await fetch(url, { headers: { Range: 'bytes=0-0' } });

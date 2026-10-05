@@ -111,12 +111,21 @@ test('prepares an MP4 without opening the share sheet, then opens it without ref
         calls.push([url instanceof URL ? url.pathname : url, options]);
         if (calls.length === 1) {
             return new Response(JSON.stringify({ data: {
-                url: '/api/share-preparations/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-                mime_type: 'video/mp4',
-                filename: 'prepared.mp4',
-            } }), { status: 200, headers: { 'content-type': 'application/json' } });
+                status_url: '/api/share-preparation-jobs/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            } }), { status: 202, headers: { 'content-type': 'application/json' } });
         }
         if (calls.length === 2) {
+            return new Response(JSON.stringify({ data: {
+                status: 'processing', stage: 'Converting', progress: 42,
+            } }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        if (calls.length === 3) {
+            return new Response(JSON.stringify({ data: {
+                status: 'ready', url: '/api/share-preparations/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                mime_type: 'video/mp4', filename: 'prepared.mp4', progress: 100,
+            } }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        if (calls.length === 4) {
             return new Response(new Uint8Array([0]), {
                 status: 206,
                 headers: { 'content-range': 'bytes 0-0/100' },
@@ -138,11 +147,11 @@ test('prepares an MP4 without opening the share sheet, then opens it without ref
             mime_type: 'video/mp4',
             label: 'Video',
             share: share(true, 82_036_850),
-        }, (state) => states.push(state));
+        }, (state) => states.push(state), { pollIntervalMs: 0, sleep: async () => {} });
 
         assert.equal(shareCalls, 0);
         assert.equal(prepared.file instanceof File, true);
-        assert.equal(calls.length, 3);
+        assert.equal(calls.length, 5);
         const opening = openShareSheet(prepared);
         assert.equal(shareCalls, 1);
         await opening;
@@ -155,7 +164,8 @@ test('prepares an MP4 without opening the share sheet, then opens it without ref
 
     assert.equal(calls.filter(([url]) => url === '/api/share-preparations').length, 1);
     assert.deepEqual(states, [
-        { phase: 'preparing' },
+        { phase: 'preparing', stage: 'Queued', percent: null },
+        { phase: 'preparing', stage: 'Converting', percent: 42 },
         { phase: 'loading', percent: null },
         { phase: 'loading', percent: 0 },
         { phase: 'loading', percent: 27 },

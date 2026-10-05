@@ -2,9 +2,14 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\PrepareShareMediaJob;
 use App\Services\Downloads\DownloadAssetStore;
+use App\Services\Downloads\DownloadException;
+use App\Services\Downloads\ShareMediaPreparationJobStore;
+use App\Services\Downloads\ShareMediaPreparationService;
 use App\Services\Downloads\ShareMediaPreparationStore;
 use App\Services\Downloads\UpstreamUrlPolicy;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -50,11 +55,8 @@ class ShareMediaPreparationTest extends TestCase
             'mime_type' => 'video/mp4',
         ]);
 
-        $response = $this->postJson('/api/share-preparations', ['token' => $token])
-            ->assertOk()
-            ->assertJsonPath('data.mime_type', 'video/mp4')
-            ->assertJsonPath('data.filename', 'Rick Astley.mp4');
-        $url = $response->json('data.url');
+        $result = $this->app->make(ShareMediaPreparationService::class)->prepare($token);
+        $url = route('api.share-preparations.show', ['preparation' => $result['id']], false);
         $this->assertMatchesRegularExpression('#^/api/share-preparations/[a-z0-9]{48}$#', $url);
         $identifier = basename($url);
         $prepared = $this->app->make(ShareMediaPreparationStore::class)->resolve($identifier);
@@ -99,8 +101,14 @@ class ShareMediaPreparationTest extends TestCase
             'mode' => 'local_file', 'provider' => 'facebook', 'path' => $source,
             'filename' => 'Facebook.mp4', 'mime_type' => 'video/mp4',
         ]);
-        $response = $this->postJson('/api/share-preparations', ['token' => $token])->assertOk();
-        $prepared = $this->app->make(ShareMediaPreparationStore::class)->resolve(basename((string) $response->json('data.url')));
+        $states = [];
+        $result = $this->app->make(ShareMediaPreparationService::class)->prepare(
+            $token,
+            static function (string $stage, ?int $progress) use (&$states): void {
+                $states[] = [$stage, $progress];
+            },
+        );
+        $prepared = $this->app->make(ShareMediaPreparationStore::class)->resolve($result['id']);
         $this->assertNotNull($prepared);
         $this->paths[] = $prepared['path'];
         $probe = $this->probe($prepared['path']);
@@ -108,6 +116,8 @@ class ShareMediaPreparationTest extends TestCase
         $this->assertSame('yuv420p', $probe['streams'][0]['pix_fmt']);
         $this->assertSame('audio', $probe['streams'][1]['codec_type']);
         $this->assertSame('vp9', $this->probe($source)['streams'][0]['codec_name']);
+        $this->assertContains(['Converting', 0], $states);
+        $this->assertContains(['Finalizing', null], $states);
     }
 
     public function test_share_preparation_is_bounded_and_expired_files_are_cleaned_up(): void
@@ -120,9 +130,12 @@ class ShareMediaPreparationTest extends TestCase
         $token = $this->app->make(DownloadAssetStore::class)->issue([
             'mode' => 'local_file', 'path' => $source, 'filename' => 'source.mp4', 'mime_type' => 'video/mp4',
         ]);
-        $this->postJson('/api/share-preparations', ['token' => $token])
-            ->assertUnprocessable()
-            ->assertJsonPath('error.code', 'share_unavailable');
+        try {
+            $this->app->make(ShareMediaPreparationService::class)->prepare($token);
+            $this->fail('Expected preparation to fail.');
+        } catch (DownloadException $exception) {
+            $this->assertSame('share_unavailable', $exception->publicCode);
+        }
 
         $store = $this->app->make(ShareMediaPreparationStore::class);
         $directory = $store->directory();
@@ -180,11 +193,8 @@ class ShareMediaPreparationTest extends TestCase
             'expected_size' => $size,
         ]);
 
-        $response = $this->postJson('/api/share-preparations', ['token' => $token])
-            ->assertOk()
-            ->assertJsonPath('data.mime_type', 'video/mp4');
-        $prepared = $this->app->make(ShareMediaPreparationStore::class)
-            ->resolve(basename((string) $response->json('data.url')));
+        $result = $this->app->make(ShareMediaPreparationService::class)->prepare($token);
+        $prepared = $this->app->make(ShareMediaPreparationStore::class)->resolve($result['id']);
         $this->assertNotNull($prepared);
         $this->paths[] = $prepared['path'];
         Http::assertSentCount(1);
@@ -205,9 +215,12 @@ class ShareMediaPreparationTest extends TestCase
             'mode' => 'local_file', 'path' => $source, 'filename' => 'source.mp4', 'mime_type' => 'video/mp4',
         ]);
 
-        $this->postJson('/api/share-preparations', ['token' => $token])
-            ->assertUnprocessable()
-            ->assertJsonPath('error.code', 'share_unavailable');
+        try {
+            $this->app->make(ShareMediaPreparationService::class)->prepare($token);
+            $this->fail('Expected preparation to fail.');
+        } catch (DownloadException $exception) {
+            $this->assertSame('share_unavailable', $exception->publicCode);
+        }
         $this->assertSame([], glob($this->app->make(ShareMediaPreparationStore::class)->directory().'/*.mp4') ?: []);
     }
 
@@ -223,10 +236,74 @@ class ShareMediaPreparationTest extends TestCase
             'mode' => 'local_file', 'path' => $source, 'filename' => 'source.mp4', 'mime_type' => 'video/mp4',
         ]);
 
-        $this->postJson('/api/share-preparations', ['token' => $token])
-            ->assertUnprocessable()
-            ->assertJsonPath('error.code', 'share_unavailable');
+        try {
+            $this->app->make(ShareMediaPreparationService::class)->prepare($token);
+            $this->fail('Expected preparation to fail.');
+        } catch (DownloadException $exception) {
+            $this->assertSame('share_unavailable', $exception->publicCode);
+        }
         $this->assertSame([], glob($this->app->make(ShareMediaPreparationStore::class)->directory().'/*.mp4') ?: []);
+    }
+
+    public function test_share_preparation_is_queued_and_status_never_exposes_its_internal_asset(): void
+    {
+        Bus::fake();
+        $source = storage_path('app/private/downloads/share-job-'.bin2hex(random_bytes(4)).'.mp4');
+        File::ensureDirectoryExists(dirname($source), 0700, true);
+        file_put_contents($source, 'source');
+        $this->paths[] = $source;
+        $token = $this->app->make(DownloadAssetStore::class)->issue([
+            'mode' => 'local_file', 'provider' => 'facebook', 'path' => $source,
+            'filename' => 'source.mp4', 'mime_type' => 'video/mp4', 'upstream_url' => 'https://secret.example/video',
+        ]);
+
+        $response = $this->postJson('/api/share-preparations', ['token' => $token])
+            ->assertAccepted()
+            ->assertJsonPath('data.status', 'queued')
+            ->assertJsonPath('data.progress', null);
+        $statusUrl = $response->json('data.status_url');
+        $this->assertMatchesRegularExpression('#^/api/share-preparation-jobs/[a-z0-9]{48}$#', $statusUrl);
+        Bus::assertDispatched(PrepareShareMediaJob::class);
+
+        $this->getJson($statusUrl)
+            ->assertOk()
+            ->assertJsonPath('data.status', 'queued')
+            ->assertDontSee('secret.example')
+            ->assertDontSee($source);
+    }
+
+    public function test_share_preparation_job_state_returns_ready_fields_only_after_completion(): void
+    {
+        $store = $this->app->make(ShareMediaPreparationJobStore::class);
+        $id = $store->create(['mode' => 'local_file', 'path' => '/private/source.mp4']);
+        $store->update($id, [
+            'status' => 'ready', 'stage' => 'Ready', 'progress' => 100,
+            'prepared_url' => '/api/share-preparations/'.str_repeat('a', 48),
+            'filename' => 'video.mp4', 'mime_type' => 'video/mp4',
+        ]);
+        $this->getJson('/api/share-preparation-jobs/'.$id)
+            ->assertOk()
+            ->assertJsonPath('data.status', 'ready')
+            ->assertJsonPath('data.filename', 'video.mp4')
+            ->assertJsonMissingPath('data.asset')
+            ->assertDontSee('/private/source.mp4');
+    }
+
+    public function test_ffmpeg_progress_is_duration_based_and_never_fabricated(): void
+    {
+        $this->assertSame(0, ShareMediaPreparationService::conversionProgressFromLine('out_time_us=0', 10.0));
+        $this->assertSame(42, ShareMediaPreparationService::conversionProgressFromLine('out_time_ms=4250000', 10.0));
+        $this->assertSame(99, ShareMediaPreparationService::conversionProgressFromLine('out_time_us=12000000', 10.0));
+        $this->assertNull(ShareMediaPreparationService::conversionProgressFromLine('out_time_us=4250000', null));
+        $this->assertNull(ShareMediaPreparationService::conversionProgressFromLine('progress=continue', 10.0));
+    }
+
+    public function test_redis_queue_retry_after_outlives_the_media_job_timeout(): void
+    {
+        $this->assertGreaterThan(
+            (int) config('services.downloads.job_timeout_seconds'),
+            (int) config('queue.connections.redis.retry_after'),
+        );
     }
 
     private function createMp4Fixture(string $path): void
