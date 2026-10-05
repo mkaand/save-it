@@ -14,7 +14,7 @@ import {
     shareErrorMessage,
     ShareMediaError,
     sharedFilename,
-    streamPreparedMediaToOpfs,
+    streamVideoToOpfs,
     transferPercent,
 } from '../../resources/js/mobile-share.js';
 
@@ -285,14 +285,14 @@ test('rejects prepared-media size and MIME mismatches before creating a File', a
     );
 });
 
-test('streams a prepared MP4 directly into OPFS without retaining response chunks', async () => {
+test('streams a video directly into OPFS without retaining response chunks', async () => {
     const originalFile = globalThis.File;
     const states = [];
     const file = new File([new Uint8Array(100)], 'prepared.mp4', { type: 'video/mp4' });
     const opfs = opfsFixture({ file });
     globalThis.File = File;
     try {
-        const stored = await streamPreparedMediaToOpfs(
+        const stored = await streamVideoToOpfs(
             new URL('https://save.allmy.win/api/share-preparations/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
             100,
             { filename: 'prepared.mp4' },
@@ -322,7 +322,7 @@ test('streams a prepared MP4 directly into OPFS without retaining response chunk
     }
 });
 
-test('calculates the 30 MB prepared-media progress class without allocating a binary fixture', () => {
+test('calculates the 30 MB video progress class without allocating a binary fixture', () => {
     const size = 30_301_218;
     assert.equal(transferPercent(0, size), 0);
     assert.equal(transferPercent(15_150_609, size), 50);
@@ -338,7 +338,7 @@ test('cleans only its OPFS session after stream failures without exposing browse
     globalThis.File = File;
     try {
         await assert.rejects(
-            () => streamPreparedMediaToOpfs(
+            () => streamVideoToOpfs(
                 new URL('https://save.allmy.win/api/share-preparations/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
                 100,
                 { filename: 'prepared.mp4' },
@@ -374,7 +374,7 @@ test('removes only stale Save It OPFS sessions and leaves unrelated entries alon
     });
     globalThis.File = File;
     try {
-        const stored = await streamPreparedMediaToOpfs(
+        const stored = await streamVideoToOpfs(
             new URL('https://save.allmy.win/api/share-preparations/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
             100,
             { filename: 'prepared.mp4' },
@@ -497,6 +497,186 @@ test('prepares an MP4 without opening the share sheet, then opens it without ref
         { phase: 'sharing' },
         { phase: 'idle' },
     ]);
+});
+
+test('uses OPFS for a direct small WebM video and opens it only on the second activation', async () => {
+    const originalFile = globalThis.File;
+    const originalNavigator = globalThis.navigator;
+    const originalWindow = globalThis.window;
+    const states = [];
+    const calls = [];
+    const opfs = opfsFixture({ file: new File([new Uint8Array(100)], 'direct.webm', { type: 'video/webm' }) });
+    let shareCalls = 0;
+
+    globalThis.File = File;
+    globalThis.window = { location: { origin: 'https://save.allmy.win' } };
+    Object.defineProperty(globalThis, 'navigator', {
+        configurable: true,
+        value: {
+            canShare: () => true,
+            share: () => {
+                shareCalls += 1;
+                return Promise.resolve();
+            },
+        },
+    });
+    const fetcher = async (url, options = {}) => {
+        calls.push([url instanceof URL ? url.pathname : url, options]);
+        if (options.headers?.Range) {
+            return new Response(new Uint8Array([0]), {
+                status: 206,
+                headers: { 'content-range': 'bytes 0-0/100' },
+            });
+        }
+
+        return preparedStream([new Uint8Array(10), new Uint8Array(90)], 'video/webm');
+    };
+
+    try {
+        const session = createShareSession({
+            delivery: 'proxy',
+            download_url: '/api/downloads/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            mime_type: 'video/webm',
+            label: 'Direct video',
+            share: share(true, 3_000_000),
+        }, {
+            onState: (state) => states.push(state),
+            prepare: (output, onState) => prepareShareMedia(output, onState, {
+                storageDirectoryFactory: async () => opfs.root,
+                randomUuid: () => '99999999-9999-9999-9999-999999999999',
+                now: () => 1_700_000_000_000,
+                fetcher,
+            }),
+        });
+
+        await session.activate();
+        assert.equal(session.phase, 'ready');
+        assert.equal(shareCalls, 0);
+        assert.deepEqual(opfs.writes.map((chunk) => chunk.byteLength), [10, 90]);
+        assert.equal(calls.filter(([url]) => url === '/api/share-preparations').length, 0);
+
+        await session.activate();
+        assert.equal(shareCalls, 1);
+        assert.equal(calls.length, 2);
+        assert.deepEqual(opfs.removed, ['session-1700000000000-99999999-9999-9999-9999-999999999999']);
+        assert.deepEqual(states, [
+            { phase: 'loading', percent: null },
+            { phase: 'loading', percent: 0 },
+            { phase: 'loading', percent: 10 },
+            { phase: 'loading', percent: 100 },
+            { phase: 'preparing', stage: 'Finalizing', percent: null },
+            { phase: 'ready' },
+            { phase: 'sharing' },
+            { phase: 'idle' },
+        ]);
+    } finally {
+        globalThis.File = originalFile;
+        globalThis.window = originalWindow;
+        Object.defineProperty(globalThis, 'navigator', { configurable: true, value: originalNavigator });
+    }
+});
+
+test('uses OPFS for a video with an unknown total and keeps progress indeterminate', async () => {
+    const originalFile = globalThis.File;
+    const originalWindow = globalThis.window;
+    const states = [];
+    const opfs = opfsFixture({ file: new File([new Uint8Array(100)], 'unknown.webm', { type: 'video/webm' }) });
+
+    globalThis.File = File;
+    globalThis.window = { location: { origin: 'https://save.allmy.win' } };
+    try {
+        const prepared = await prepareShareMedia({
+            delivery: 'proxy',
+            download_url: '/api/downloads/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            mime_type: 'video/webm',
+            label: 'Unknown total',
+            share: share(true, 90_000_000),
+        }, (state) => states.push(state), {
+            storageDirectoryFactory: async () => opfs.root,
+            randomUuid: () => 'abababab-abab-abab-abab-abababababab',
+            now: () => 1_700_000_000_000,
+            fetcher: async (_url, options = {}) => options.headers?.Range
+                ? new Response(new Uint8Array([0]), { status: 206 })
+                : preparedStream([new Uint8Array(40), new Uint8Array(60)], 'video/webm'),
+        });
+
+        assert.equal(prepared.file.size, 100);
+        assert.deepEqual(opfs.writes.map((chunk) => chunk.byteLength), [40, 60]);
+        assert.deepEqual(states, [
+            { phase: 'loading', percent: null },
+            { phase: 'loading', percent: null },
+            { phase: 'preparing', stage: 'Finalizing', percent: null },
+        ]);
+        await prepared.cleanup();
+    } finally {
+        globalThis.File = originalFile;
+        globalThis.window = originalWindow;
+    }
+});
+
+test('uses the existing Blob fallback for direct video only when OPFS is unavailable', async () => {
+    const originalFile = globalThis.File;
+    const originalWindow = globalThis.window;
+    const states = [];
+    let requests = 0;
+
+    globalThis.File = File;
+    globalThis.window = { location: { origin: 'https://save.allmy.win' } };
+    try {
+        const prepared = await prepareShareMedia({
+            delivery: 'proxy',
+            download_url: '/api/downloads/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            mime_type: 'video/webm',
+            label: 'Fallback video',
+            share: share(true, 3_000_000),
+        }, (state) => states.push(state), {
+            storageDirectoryFactory: async () => null,
+            fetcher: async (_url, options = {}) => {
+                requests += 1;
+                return options.headers?.Range
+                    ? new Response(new Uint8Array([0]), { status: 206, headers: { 'content-range': 'bytes 0-0/100' } })
+                    : preparedStream([new Uint8Array(100)], 'video/webm');
+            },
+        });
+
+        assert.equal(prepared.file.type, 'video/webm');
+        assert.equal(prepared.file.size, 100);
+        assert.equal(requests, 2);
+        assert.deepEqual(states, [
+            { phase: 'loading', percent: null },
+            { phase: 'loading', percent: 0 },
+            { phase: 'loading', percent: 100 },
+        ]);
+    } finally {
+        globalThis.File = originalFile;
+        globalThis.window = originalWindow;
+    }
+});
+
+test('keeps the 100 MiB video share limit before OPFS streaming begins', async () => {
+    const originalWindow = globalThis.window;
+    globalThis.window = { location: { origin: 'https://save.allmy.win' } };
+    try {
+        await assert.rejects(
+            () => prepareShareMedia({
+                delivery: 'proxy',
+                download_url: '/api/downloads/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                mime_type: 'video/webm',
+                share: share(true, 104_857_601),
+            }, () => {}, {
+                storageDirectoryFactory: async () => {
+                    throw new Error('OPFS must not be opened for oversized media');
+                },
+                fetcher: async () => new Response(new Uint8Array([0]), {
+                    status: 206,
+                    headers: { 'content-range': 'bytes 0-0/104857601' },
+                }),
+            }),
+            (error) => error instanceof ShareMediaError && error.code === 'media_too_large',
+        );
+    } finally {
+        globalThis.window = originalWindow;
+    }
 });
 
 test('keeps a prepared image usable after an AbortError without refetching', async () => {
