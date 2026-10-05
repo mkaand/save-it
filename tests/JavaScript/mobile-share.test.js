@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { File } from 'node:buffer';
+import { createShareSession } from '../../resources/js/share-session.js';
 
 import {
     canOfferMobileShare,
@@ -25,6 +26,7 @@ function preparedBlobRequest({ blob, status = 200, headers = {}, progress = [], 
                 return headers[name.toLowerCase()] || null;
             },
             send() {
+                assert.equal(this.responseType, 'blob');
                 if (failure) {
                     this[failure]?.();
 
@@ -131,7 +133,7 @@ test('loads prepared MP4s through a native Blob response with real byte progress
                     'content-type': 'video/mp4',
                     'content-disposition': 'attachment; filename="prepared.mp4"',
                 },
-                progress: [27, 100],
+                progress: [0, 27, 27, 15, 100, 101],
                 calls: requests,
             }),
         },
@@ -182,19 +184,21 @@ test('calculates native prepared-media progress for a 30 MB class artifact witho
     ]);
 });
 
-test('rejects prepared-media XHR failures without exposing browser details', async () => {
+for (const failure of ['onerror', 'onabort', 'ontimeout']) {
+test(`rejects prepared-media XHR ${failure} without exposing browser details`, async () => {
     await assert.rejects(
         () => loadPreparedBlob(
             new URL('https://save.allmy.win/api/share-preparations/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
             100,
             () => {},
-            { requestFactory: preparedBlobRequest({ failure: 'onerror' }) },
+            { requestFactory: preparedBlobRequest({ failure }) },
         ),
         (error) => error instanceof ShareMediaError
             && error.code === 'share_unavailable'
             && error.message === 'The prepared file could not be loaded for sharing.',
     );
 });
+}
 
 test('rejects prepared-media size and MIME mismatches before creating a File', async () => {
     const sizeMismatch = new Blob([new Uint8Array(99)], { type: 'video/mp4' });
@@ -271,13 +275,15 @@ test('prepares an MP4 without opening the share sheet, then opens it without ref
     };
 
     try {
-        const prepared = await prepareShareMedia({
+        const session = createShareSession({
             delivery: 'proxy',
             download_url: '/api/downloads/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
             mime_type: 'video/mp4',
             label: 'Video',
             share: share(true, 82_036_850),
-        }, (state) => states.push(state), {
+        }, {
+            onState: (state) => states.push(state),
+            prepare: (output, onState) => prepareShareMedia(output, onState, {
             pollIntervalMs: 0,
             sleep: async () => {},
             requestFactory: preparedBlobRequest({
@@ -289,15 +295,20 @@ test('prepares an MP4 without opening the share sheet, then opens it without ref
                 progress: [27, 100],
                 calls: nativeRequests,
             }),
+            }),
         });
+        await session.activate();
 
         assert.equal(shareCalls, 0);
-        assert.equal(prepared.file instanceof File, true);
+        assert.equal(session.phase, 'ready');
+        assert.equal(session.prepared.file instanceof File, true);
         assert.equal(calls.length, 4);
         assert.equal(nativeRequests.length, 1);
-        const opening = openShareSheet(prepared);
+        const opening = session.activate();
         assert.equal(shareCalls, 1);
         await opening;
+        assert.equal(calls.length, 4);
+        assert.equal(nativeRequests.length, 1);
     } finally {
         globalThis.fetch = originalFetch;
         globalThis.File = originalFile;
@@ -314,6 +325,9 @@ test('prepares an MP4 without opening the share sheet, then opens it without ref
         { phase: 'loading', percent: 27 },
         { phase: 'loading', percent: 100 },
         { phase: 'preparing', stage: 'Finalizing', percent: null },
+        { phase: 'ready' },
+        { phase: 'sharing' },
+        { phase: 'idle' },
     ]);
 });
 

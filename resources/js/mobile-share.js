@@ -167,7 +167,7 @@ export function loadPreparedBlob(url, size, onState = () => {}, {
 } = {}) {
     return new Promise((resolve, reject) => {
         let request;
-        let lastPercent = -1;
+        let lastPercent = 0;
         const fail = () => reject(new ShareMediaError(
             'share_unavailable',
             'The prepared file could not be loaded for sharing.',
@@ -182,7 +182,7 @@ export function loadPreparedBlob(url, size, onState = () => {}, {
                     return;
                 }
                 const percent = Math.min(100, Math.max(0, Math.floor((event.loaded / size) * 100)));
-                if (percent !== lastPercent) {
+                if (percent > lastPercent) {
                     lastPercent = percent;
                     onState({ phase: 'loading', percent });
                 }
@@ -192,8 +192,9 @@ export function loadPreparedBlob(url, size, onState = () => {}, {
             request.ontimeout = fail;
             request.onload = () => {
                 const blob = request.response;
-                const mime = mediaType(request.getResponseHeader?.('content-type')) || mediaType(blob?.type);
-                if (request.status < 200 || request.status >= 300 || !(blob instanceof Blob) || blob.size !== size || mime !== 'video/mp4') {
+                const contentType = request.getResponseHeader?.('content-type');
+                const mime = mediaType(contentType || blob?.type);
+                if (request.status !== 200 || !(blob instanceof Blob) || blob.size !== size || mime !== 'video/mp4' || (blob.type && mediaType(blob.type) !== 'video/mp4')) {
                     fail();
 
                     return;
