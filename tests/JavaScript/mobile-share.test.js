@@ -177,6 +177,58 @@ test('uses Loading without a percentage when stream reading is unavailable', asy
     assert.deepEqual(states, [{ phase: 'loading', percent: null }]);
 });
 
+test('prepares a direct image with an unknown transfer size without fabricating progress', async () => {
+    const originalFile = globalThis.File;
+    const originalWindow = globalThis.window;
+    const states = [];
+    globalThis.File = File;
+    globalThis.window = { location: { origin: 'https://save.allmy.win' } };
+
+    try {
+        const prepared = await prepareShareMedia({
+            delivery: 'proxy',
+            download_url: '/api/downloads/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            mime_type: 'image/jpeg',
+            label: 'Image 1 of 5',
+            share: share(null),
+        }, (state) => states.push(state), {
+            fetcher: async (_url, options = {}) => options.headers?.Range
+                ? new Response(new Uint8Array([0]), { status: 206 })
+                : new Response(new ReadableStream({
+                    start(controller) {
+                        controller.enqueue(new Uint8Array(20));
+                        controller.enqueue(new Uint8Array(30));
+                        controller.close();
+                    },
+                }), { status: 200, headers: { 'content-type': 'image/jpeg' } }),
+        });
+
+        assert.equal(prepared.file.type, 'image/jpeg');
+        assert.equal(prepared.file.size, 50);
+        assert.deepEqual(states, [
+            { phase: 'loading', percent: null },
+            { phase: 'loading', percent: null },
+        ]);
+    } finally {
+        globalThis.File = originalFile;
+        globalThis.window = originalWindow;
+    }
+});
+
+test('keeps the share limit while reading an image with an unknown transfer size', async () => {
+    const response = new Response(new ReadableStream({
+        start(controller) {
+            controller.enqueue(new Uint8Array(3));
+            controller.close();
+        },
+    }), { headers: { 'content-type': 'image/jpeg' } });
+
+    await assert.rejects(
+        () => responseBlob(response, null, () => {}, 2),
+        (error) => error instanceof ShareMediaError && error.code === 'media_too_large',
+    );
+});
+
 test('loads prepared MP4s through a native Blob response with real byte progress', async () => {
     const states = [];
     const requests = [];

@@ -190,8 +190,9 @@ def test_carousel_keeps_source_order_and_item_specific_previews() -> None:
     children = [
         media_node(suffix="ImageA"),
         media_node(video=True, suffix="VideoB"),
-        media_node(suffix="ImageC"),
-        media_node(video=True, suffix="VideoD"),
+        media_node(video=True, suffix="VideoC"),
+        media_node(suffix="ImageD"),
+        media_node(video=True, suffix="VideoE"),
     ]
 
     _, assets, media_type = parse_instagram_embed(
@@ -199,13 +200,14 @@ def test_carousel_keeps_source_order_and_item_specific_previews() -> None:
     )
 
     assert media_type == "carousel"
-    assert [asset["type"] for asset in assets] == ["image", "video", "image", "video"]
-    assert [asset["order"] for asset in assets] == [1, 2, 3, 4]
+    assert [asset["type"] for asset in assets] == ["image", "video", "video", "image", "video"]
+    assert [asset["order"] for asset in assets] == [1, 2, 3, 4, 5]
     assert [asset["thumbnail_url"] for asset in assets] == [
         child["display_url"] for child in children
     ]
     assert assets[1]["url"] == children[1]["video_url"]
-    assert assets[3]["url"] == children[3]["video_url"]
+    assert assets[2]["url"] == children[2]["video_url"]
+    assert assets[4]["url"] == children[4]["video_url"]
 
 
 def test_carousel_keeps_repeated_source_items_in_their_original_positions() -> None:

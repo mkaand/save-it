@@ -133,8 +133,10 @@ export function sharedFilename(output, mime, disposition = null) {
     return `${stem}.${extension}`;
 }
 
-export async function responseBlob(response, size, onState = () => {}) {
+export async function responseBlob(response, size, onState = () => {}, maximum = null) {
     const reader = response.body?.getReader?.();
+    const knownSize = Number.isSafeInteger(size) && size > 0 ? size : null;
+    const maximumSize = Number.isSafeInteger(maximum) && maximum > 0 ? maximum : null;
 
     if (!reader) {
         onState({ phase: 'loading', percent: null });
@@ -144,7 +146,7 @@ export async function responseBlob(response, size, onState = () => {}) {
     const chunks = [];
     let received = 0;
     let lastPercent = -1;
-    onState({ phase: 'loading', percent: 0 });
+    onState({ phase: 'loading', percent: knownSize === null ? null : 0 });
 
     while (true) {
         const { done, value } = await reader.read();
@@ -152,10 +154,13 @@ export async function responseBlob(response, size, onState = () => {}) {
             break;
         }
 
+        if (maximumSize !== null && received + value.byteLength > maximumSize) {
+            throw new ShareMediaError('media_too_large', 'Download only · Too large for Share / Save');
+        }
         chunks.push(value);
         received += value.byteLength;
-        const percent = Math.min(100, Math.floor((received / size) * 100));
-        if (percent !== lastPercent) {
+        const percent = transferPercent(received, knownSize);
+        if (percent !== null && percent > lastPercent) {
             lastPercent = percent;
             onState({ phase: 'loading', percent });
         }
@@ -415,6 +420,7 @@ export async function prepareShareMedia(output, onState = () => {}, {
     let preparedArtifact = false;
     let expectedMime = mediaType(output?.mime_type);
     const video = expectedMime?.startsWith('video/');
+    const image = expectedMime?.startsWith('image/');
     if (expectedMime === 'video/mp4') {
         onState({ phase: 'preparing', stage: 'Queued', percent: null });
         const token = tokenFromDelivery(url);
@@ -447,7 +453,10 @@ export async function prepareShareMedia(output, onState = () => {}, {
     const size = match ? Number(match[1]) : Number(probe.headers.get('content-length'));
     await probe.body?.cancel();
     const knownSize = Number.isSafeInteger(size) && size > 0 ? size : null;
-    if ((knownSize && knownSize > maximum) || (!knownSize && (!video || preparedArtifact))) {
+    // A direct image can still be bounded while streaming even when its CDN
+    // does not expose a usable range total. Prepared artifacts, audio, and
+    // unknown types retain their existing exact-size requirement.
+    if ((knownSize && knownSize > maximum) || (!knownSize && (preparedArtifact || (!video && !image)))) {
         throw new ShareMediaError('media_too_large', 'Download only · Too large for Share / Save');
     }
     let blob;
@@ -484,11 +493,11 @@ export async function prepareShareMedia(output, onState = () => {}, {
         if (!response.ok) {
             throw new ShareMediaError('share_unavailable', 'The file could not be prepared for sharing.');
         }
-        blob = await responseBlob(response, knownSize, onState);
+        blob = await responseBlob(response, knownSize, onState, maximum);
         mime = mediaType(response.headers.get('content-type')) || mediaType(blob.type);
         disposition = response.headers.get('content-disposition');
     }
-    if (blob.size !== knownSize || blob.size > maximum || !mime) {
+    if ((knownSize !== null && blob.size !== knownSize) || blob.size > maximum || !mime) {
         throw new ShareMediaError('share_unavailable', 'The file could not be prepared for sharing.');
     }
     let file;
