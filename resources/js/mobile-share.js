@@ -161,6 +161,58 @@ export async function responseBlob(response, size, onState = () => {}) {
     return new Blob(chunks, { type: response.headers.get('content-type') || '' });
 }
 
+export function loadPreparedBlob(url, size, onState = () => {}, {
+    requestFactory = () => new XMLHttpRequest(),
+    timeoutMs = 0,
+} = {}) {
+    return new Promise((resolve, reject) => {
+        let request;
+        let lastPercent = -1;
+        const fail = () => reject(new ShareMediaError(
+            'share_unavailable',
+            'The prepared file could not be loaded for sharing.',
+        ));
+        try {
+            request = requestFactory();
+            request.open('GET', url.toString(), true);
+            request.responseType = 'blob';
+            request.timeout = timeoutMs;
+            request.onprogress = (event) => {
+                if (!Number.isFinite(event.loaded) || event.loaded < 0) {
+                    return;
+                }
+                const percent = Math.min(100, Math.max(0, Math.floor((event.loaded / size) * 100)));
+                if (percent !== lastPercent) {
+                    lastPercent = percent;
+                    onState({ phase: 'loading', percent });
+                }
+            };
+            request.onerror = fail;
+            request.onabort = fail;
+            request.ontimeout = fail;
+            request.onload = () => {
+                const blob = request.response;
+                const mime = mediaType(request.getResponseHeader?.('content-type')) || mediaType(blob?.type);
+                if (request.status < 200 || request.status >= 300 || !(blob instanceof Blob) || blob.size !== size || mime !== 'video/mp4') {
+                    fail();
+
+                    return;
+                }
+                onState({ phase: 'preparing', stage: 'Finalizing', percent: null });
+                resolve({
+                    blob,
+                    mime,
+                    disposition: request.getResponseHeader?.('content-disposition') || null,
+                });
+            };
+            onState({ phase: 'loading', percent: 0 });
+            request.send();
+        } catch {
+            fail();
+        }
+    });
+}
+
 const pause = (milliseconds) => new Promise((resolve) => globalThis.setTimeout(resolve, milliseconds));
 
 async function preparedMediaFromJob(statusUrl, onState, { pollIntervalMs, sleep }) {
@@ -196,6 +248,7 @@ async function preparedMediaFromJob(statusUrl, onState, { pollIntervalMs, sleep 
 export async function prepareShareMedia(output, onState = () => {}, {
     pollIntervalMs = 1000,
     sleep = pause,
+    requestFactory,
 } = {}) {
     if (output?.share?.eligible === false) {
         throw new ShareMediaError('media_too_large', 'Download only · Too large for Share / Save');
@@ -208,6 +261,7 @@ export async function prepareShareMedia(output, onState = () => {}, {
     if (!url) {
         throw new Error('This file is no longer available. Analyze the URL again.');
     }
+    let preparedArtifact = false;
     if (mediaType(output?.mime_type) === 'video/mp4') {
         onState({ phase: 'preparing', stage: 'Queued', percent: null });
         const token = tokenFromDelivery(url);
@@ -230,6 +284,7 @@ export async function prepareShareMedia(output, onState = () => {}, {
         const prepared = await preparedMediaFromJob(statusUrl, onState, { pollIntervalMs, sleep });
         url = prepared.url;
         output = { ...output, filename: prepared.filename, mime_type: prepared.mime_type };
+        preparedArtifact = true;
     }
     onState({ phase: 'loading', percent: null });
     const probe = await fetch(url, { headers: { Range: 'bytes=0-0' } });
@@ -240,18 +295,32 @@ export async function prepareShareMedia(output, onState = () => {}, {
     if (!Number.isSafeInteger(size) || size < 1 || size > maximum) {
         throw new ShareMediaError('media_too_large', 'Download only · Too large for Share / Save');
     }
-    const response = await fetch(url);
-    if (!response.ok) {
+    let blob;
+    let mime;
+    let disposition = null;
+    if (preparedArtifact) {
+        const loaded = await loadPreparedBlob(url, size, onState, { requestFactory });
+        blob = loaded.blob;
+        mime = loaded.mime;
+        disposition = loaded.disposition;
+    } else {
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new ShareMediaError('share_unavailable', 'The file could not be prepared for sharing.');
+        }
+        blob = await responseBlob(response, size, onState);
+        mime = mediaType(response.headers.get('content-type')) || mediaType(blob.type);
+        disposition = response.headers.get('content-disposition');
+    }
+    if (blob.size !== size || blob.size > maximum || !mime) {
         throw new ShareMediaError('share_unavailable', 'The file could not be prepared for sharing.');
     }
-    const blob = await responseBlob(response, size, onState);
-    const mime = mediaType(response.headers.get('content-type')) || mediaType(blob.type);
-    if (blob.size !== size || blob.size > maximum) {
-        throw new ShareMediaError('share_unavailable', 'The file could not be prepared for sharing.');
+    let file;
+    try {
+        file = new File([blob], sharedFilename(output, mime, disposition), { type: mime });
+    } catch {
+        throw new ShareMediaError('share_unavailable', 'The prepared file could not be loaded for sharing.');
     }
-    const file = new File([blob], sharedFilename(output, mime || blob.type, response.headers.get('content-disposition')), {
-        type: mime || mediaType(blob.type) || 'application/octet-stream',
-    });
     return Object.freeze({
         file,
         title: output.label || 'Save It media',

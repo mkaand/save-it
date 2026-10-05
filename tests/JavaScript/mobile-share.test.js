@@ -6,6 +6,7 @@ import { File } from 'node:buffer';
 import {
     canOfferMobileShare,
     isShareAbortError,
+    loadPreparedBlob,
     openShareSheet,
     prepareShareMedia,
     responseBlob,
@@ -13,6 +14,34 @@ import {
     ShareMediaError,
     sharedFilename,
 } from '../../resources/js/mobile-share.js';
+
+function preparedBlobRequest({ blob, status = 200, headers = {}, progress = [], failure = null, calls = null }) {
+    return () => {
+        const request = {
+            open(method, url) {
+                calls?.push({ method, url });
+            },
+            getResponseHeader(name) {
+                return headers[name.toLowerCase()] || null;
+            },
+            send() {
+                if (failure) {
+                    this[failure]?.();
+
+                    return;
+                }
+                for (const loaded of progress) {
+                    this.onprogress?.({ loaded });
+                }
+                this.status = status;
+                this.response = blob;
+                this.onload?.();
+            },
+        };
+
+        return request;
+    };
+}
 
 const share = (eligible = null, size = null) => ({
     eligible,
@@ -86,6 +115,112 @@ test('uses Loading without a percentage when stream reading is unavailable', asy
     assert.deepEqual(states, [{ phase: 'loading', percent: null }]);
 });
 
+test('loads prepared MP4s through a native Blob response with real byte progress', async () => {
+    const states = [];
+    const requests = [];
+    const blob = new Blob([new Uint8Array(100)], { type: 'video/mp4' });
+
+    const loaded = await loadPreparedBlob(
+        new URL('https://save.allmy.win/api/share-preparations/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+        100,
+        (state) => states.push(state),
+        {
+            requestFactory: preparedBlobRequest({
+                blob,
+                headers: {
+                    'content-type': 'video/mp4',
+                    'content-disposition': 'attachment; filename="prepared.mp4"',
+                },
+                progress: [27, 100],
+                calls: requests,
+            }),
+        },
+    );
+
+    assert.equal(loaded.blob, blob);
+    assert.equal(loaded.mime, 'video/mp4');
+    assert.equal(loaded.disposition, 'attachment; filename="prepared.mp4"');
+    assert.deepEqual(requests, [{
+        method: 'GET',
+        url: 'https://save.allmy.win/api/share-preparations/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    }]);
+    assert.deepEqual(states, [
+        { phase: 'loading', percent: 0 },
+        { phase: 'loading', percent: 27 },
+        { phase: 'loading', percent: 100 },
+        { phase: 'preparing', stage: 'Finalizing', percent: null },
+    ]);
+});
+
+test('calculates native prepared-media progress for a 30 MB class artifact without allocating it', async () => {
+    const states = [];
+    const size = 30_301_218;
+    const blob = Object.create(Blob.prototype);
+    Object.defineProperties(blob, {
+        size: { value: size },
+        type: { value: 'video/mp4' },
+    });
+
+    await loadPreparedBlob(
+        new URL('https://save.allmy.win/api/share-preparations/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+        size,
+        (state) => states.push(state),
+        {
+            requestFactory: preparedBlobRequest({
+                blob,
+                headers: { 'content-type': 'video/mp4' },
+                progress: [15_150_609, size],
+            }),
+        },
+    );
+
+    assert.deepEqual(states, [
+        { phase: 'loading', percent: 0 },
+        { phase: 'loading', percent: 50 },
+        { phase: 'loading', percent: 100 },
+        { phase: 'preparing', stage: 'Finalizing', percent: null },
+    ]);
+});
+
+test('rejects prepared-media XHR failures without exposing browser details', async () => {
+    await assert.rejects(
+        () => loadPreparedBlob(
+            new URL('https://save.allmy.win/api/share-preparations/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+            100,
+            () => {},
+            { requestFactory: preparedBlobRequest({ failure: 'onerror' }) },
+        ),
+        (error) => error instanceof ShareMediaError
+            && error.code === 'share_unavailable'
+            && error.message === 'The prepared file could not be loaded for sharing.',
+    );
+});
+
+test('rejects prepared-media size and MIME mismatches before creating a File', async () => {
+    const sizeMismatch = new Blob([new Uint8Array(99)], { type: 'video/mp4' });
+    const invalidMime = new Blob([new Uint8Array(100)], { type: 'text/plain' });
+    const url = new URL('https://save.allmy.win/api/share-preparations/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+
+    await assert.rejects(
+        () => loadPreparedBlob(url, 100, () => {}, {
+            requestFactory: preparedBlobRequest({
+                blob: sizeMismatch,
+                headers: { 'content-type': 'video/mp4' },
+            }),
+        }),
+        ShareMediaError,
+    );
+    await assert.rejects(
+        () => loadPreparedBlob(url, 100, () => {}, {
+            requestFactory: preparedBlobRequest({
+                blob: invalidMime,
+                headers: { 'content-type': 'text/plain' },
+            }),
+        }),
+        ShareMediaError,
+    );
+});
+
 test('prepares an MP4 without opening the share sheet, then opens it without refetching', async () => {
     const originalFetch = globalThis.fetch;
     const originalNavigator = globalThis.navigator;
@@ -93,6 +228,7 @@ test('prepares an MP4 without opening the share sheet, then opens it without ref
     const originalWindow = globalThis.window;
     const states = [];
     const calls = [];
+    const nativeRequests = [];
     let shareCalls = 0;
 
     globalThis.File = File;
@@ -131,13 +267,7 @@ test('prepares an MP4 without opening the share sheet, then opens it without ref
                 headers: { 'content-range': 'bytes 0-0/100' },
             });
         }
-        return new Response(new ReadableStream({
-            start(controller) {
-                controller.enqueue(new Uint8Array(27));
-                controller.enqueue(new Uint8Array(73));
-                controller.close();
-            },
-        }), { headers: { 'content-type': 'video/mp4' } });
+        throw new Error('Prepared MP4 must use native Blob loading instead of fetch streaming.');
     };
 
     try {
@@ -147,11 +277,24 @@ test('prepares an MP4 without opening the share sheet, then opens it without ref
             mime_type: 'video/mp4',
             label: 'Video',
             share: share(true, 82_036_850),
-        }, (state) => states.push(state), { pollIntervalMs: 0, sleep: async () => {} });
+        }, (state) => states.push(state), {
+            pollIntervalMs: 0,
+            sleep: async () => {},
+            requestFactory: preparedBlobRequest({
+                blob: new Blob([new Uint8Array(100)], { type: 'video/mp4' }),
+                headers: {
+                    'content-type': 'video/mp4',
+                    'content-disposition': 'attachment; filename="prepared.mp4"',
+                },
+                progress: [27, 100],
+                calls: nativeRequests,
+            }),
+        });
 
         assert.equal(shareCalls, 0);
         assert.equal(prepared.file instanceof File, true);
-        assert.equal(calls.length, 5);
+        assert.equal(calls.length, 4);
+        assert.equal(nativeRequests.length, 1);
         const opening = openShareSheet(prepared);
         assert.equal(shareCalls, 1);
         await opening;
@@ -170,6 +313,7 @@ test('prepares an MP4 without opening the share sheet, then opens it without ref
         { phase: 'loading', percent: 0 },
         { phase: 'loading', percent: 27 },
         { phase: 'loading', percent: 100 },
+        { phase: 'preparing', stage: 'Finalizing', percent: null },
     ]);
 });
 
