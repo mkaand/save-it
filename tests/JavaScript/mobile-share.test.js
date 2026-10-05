@@ -177,6 +177,193 @@ test('uses Loading without a percentage when stream reading is unavailable', asy
     assert.deepEqual(states, [{ phase: 'loading', percent: null }]);
 });
 
+test('prepares a direct image with an unknown transfer size without fabricating progress', async () => {
+    const originalFile = globalThis.File;
+    const originalWindow = globalThis.window;
+    const states = [];
+    globalThis.File = File;
+    globalThis.window = { location: { origin: 'https://save.allmy.win' } };
+
+    try {
+        const prepared = await prepareShareMedia({
+            delivery: 'proxy',
+            download_url: '/api/downloads/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            mime_type: 'image/jpeg',
+            label: 'Image 1 of 5',
+            share: share(null),
+        }, (state) => states.push(state), {
+            fetcher: async (_url, options = {}) => options.headers?.Range
+                ? new Response(new Uint8Array([0]), { status: 206 })
+                : new Response(new ReadableStream({
+                    start(controller) {
+                        controller.enqueue(new Uint8Array(20));
+                        controller.enqueue(new Uint8Array(30));
+                        controller.close();
+                    },
+                }), { status: 200, headers: { 'content-type': 'image/jpeg' } }),
+        });
+
+        assert.equal(prepared.file.type, 'image/jpeg');
+        assert.equal(prepared.file.size, 50);
+        assert.deepEqual(states, [
+            { phase: 'loading', percent: null },
+            { phase: 'loading', percent: null },
+        ]);
+    } finally {
+        globalThis.File = originalFile;
+        globalThis.window = originalWindow;
+    }
+});
+
+for (const contentLength of [null, '50']) {
+test(`keeps a complete image ready when its full GET differs from the range representation (${contentLength})`, async () => {
+    const originalFile = globalThis.File;
+    const originalWindow = globalThis.window;
+    globalThis.File = File;
+    globalThis.window = { location: { origin: 'https://save.allmy.win' } };
+    const states = [];
+    const errors = [];
+    let requests = 0;
+    let shares = 0;
+    let streamCompleted = false;
+    const output = {
+        delivery: 'proxy',
+        download_url: `/api/downloads/${'a'.repeat(48)}.${'b'.repeat(64)}`,
+        mime_type: 'image/jpeg',
+        label: 'Image 1 of 5',
+        share: share(null),
+    };
+    try {
+        const session = createShareSession(output, {
+            onState: (state) => states.push(state),
+            onError: (error) => errors.push(error),
+            open: ({ file }) => {
+                shares += 1;
+                assert.equal(file.size, 50);
+                return Promise.resolve();
+            },
+            prepare: (item, onState) => prepareShareMedia(item, onState, {
+                fetcher: async (_url, options = {}) => {
+                    requests += 1;
+                    if (options.headers?.Range) {
+                        return new Response(new Uint8Array(1), {
+                            status: 206,
+                            headers: { 'content-range': 'bytes 0-0/644078' },
+                        });
+                    }
+                    return new Response(new ReadableStream({
+                        start(controller) {
+                            controller.enqueue(new Uint8Array(20));
+                            controller.enqueue(new Uint8Array(30));
+                            controller.close();
+                            streamCompleted = true;
+                        },
+                    }), { headers: {
+                        'content-type': 'image/jpeg; charset=binary',
+                        'content-disposition': 'attachment; filename="first.jpg"',
+                        ...(contentLength === null ? {} : { 'content-length': contentLength }),
+                    } });
+                },
+            }),
+        });
+        await session.activate();
+        assert.deepEqual(errors, []);
+        assert.equal(streamCompleted, true);
+        assert.equal(session.phase, 'ready');
+        assert.equal(session.prepared.file instanceof File, true);
+        assert.equal(session.prepared.file.type, 'image/jpeg');
+        assert.equal(session.prepared.file.name, 'first.jpg');
+        assert.equal(session.prepared.file.size, 50);
+        assert.equal(shares, 0);
+        const progress = states.filter((state) => state.phase === 'loading').map((state) => state.percent);
+        assert.deepEqual(progress, contentLength === null ? [null, null] : [null, 0, 40, 100]);
+        const opening = session.activate();
+        assert.equal(shares, 1);
+        await opening;
+        assert.equal(requests, 2);
+    } finally {
+        globalThis.File = originalFile;
+        globalThis.window = originalWindow;
+    }
+});
+}
+
+for (const scenario of [
+    { name: 'truncated full response', length: '51', type: 'image/jpeg', size: 50, maximum: 100 },
+    { name: 'invalid full length', length: 'invalid', type: 'image/jpeg', size: 50 },
+    { name: 'empty full response', type: 'image/jpeg', size: 0 },
+    { name: 'oversized stream', type: 'image/jpeg', size: 51 },
+    { name: 'oversized declared response', length: '51', type: 'image/jpeg', size: 50 },
+    { name: 'HTML response', type: 'text/html', size: 50 },
+    { name: 'video response for image', type: 'video/mp4', size: 50 },
+    { name: 'missing MIME', size: 50 },
+    { name: 'partial full response', status: 206, type: 'image/jpeg', size: 50 },
+    { name: 'expired token', status: 410, type: 'application/json', size: 50 },
+]) {
+test(`never enters ready for an image with ${scenario.name}`, async () => {
+    const originalFile = globalThis.File;
+    const originalWindow = globalThis.window;
+    globalThis.File = File;
+    globalThis.window = { location: { origin: 'https://save.allmy.win' } };
+    const states = [];
+    const errors = [];
+    try {
+        const session = createShareSession({
+            delivery: 'proxy',
+            download_url: `/api/downloads/${'a'.repeat(48)}.${'b'.repeat(64)}`,
+            mime_type: 'image/jpeg',
+            share: { ...share(null), max_bytes: scenario.maximum || 50 },
+        }, {
+            onState: (state) => states.push(state),
+            onError: (message) => errors.push(message),
+            onDownloadOnly: (error) => errors.push(error.message),
+            prepare: (output, onState) => prepareShareMedia(output, onState, {
+                fetcher: async (_url, options = {}) => options.headers?.Range
+                    ? new Response(new Uint8Array(1), { status: 206, headers: { 'content-range': 'bytes 0-0/50' } })
+                    : new Response(new Uint8Array(scenario.size), { status: scenario.status || 200, headers: {
+                        ...(scenario.type ? { 'content-type': scenario.type } : {}),
+                        ...(scenario.length ? { 'content-length': scenario.length } : {}),
+                    } }),
+            }),
+        });
+        await session.activate();
+        assert.equal(session.phase, 'idle');
+        assert.equal(session.prepared, null);
+        assert.equal(states.some((state) => state.phase === 'ready'), false);
+        assert.equal(errors.length, 1);
+    } finally {
+        globalThis.File = originalFile;
+        globalThis.window = originalWindow;
+    }
+});
+}
+
+test('keeps the share limit while reading an image with an unknown transfer size', async () => {
+    let cancelled = false;
+    const response = new Response(new ReadableStream({
+        start(controller) {
+            controller.enqueue(new Uint8Array(3));
+        },
+        cancel() { cancelled = true; },
+    }), { headers: { 'content-type': 'image/jpeg' } });
+
+    await assert.rejects(
+        () => responseBlob(response, null, () => {}, 2),
+        (error) => error instanceof ShareMediaError && error.code === 'media_too_large',
+    );
+    assert.equal(cancelled, true);
+});
+
+test('rejects unknown-size image bodies that cannot be bounded with a reader', async () => {
+    await assert.rejects(
+        () => responseBlob({
+            body: null,
+            blob: () => { throw new Error('Unbounded image buffering must not run'); },
+        }, null, () => {}, 104_857_600),
+        (error) => error instanceof ShareMediaError && error.code === 'share_unavailable',
+    );
+});
+
 test('loads prepared MP4s through a native Blob response with real byte progress', async () => {
     const states = [];
     const requests = [];

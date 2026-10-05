@@ -186,6 +186,46 @@ def test_parser_supports_post_reel_image_and_carousel(
     assert not any("binary" in asset or "download" in asset for asset in assets)
 
 
+def test_carousel_keeps_source_order_and_item_specific_previews() -> None:
+    children = [
+        media_node(suffix="ImageA"),
+        media_node(video=True, suffix="VideoB"),
+        media_node(video=True, suffix="VideoC"),
+        media_node(suffix="ImageD"),
+        media_node(video=True, suffix="VideoE"),
+    ]
+
+    _, assets, media_type = parse_instagram_embed(
+        document(root_media(children=children)), "Code123", "post"
+    )
+
+    assert media_type == "carousel"
+    assert [asset["type"] for asset in assets] == ["image", "video", "video", "image", "video"]
+    assert [asset["order"] for asset in assets] == [1, 2, 3, 4, 5]
+    assert [asset["thumbnail_url"] for asset in assets] == [
+        child["display_url"] for child in children
+    ]
+    assert assets[1]["url"] == children[1]["video_url"]
+    assert assets[2]["url"] == children[2]["video_url"]
+    assert assets[4]["url"] == children[4]["video_url"]
+
+
+def test_carousel_keeps_repeated_source_items_in_their_original_positions() -> None:
+    first = media_node(suffix="Repeated")
+    children = [first, media_node(video=True, suffix="Video"), first.copy()]
+
+    _, assets, media_type = parse_instagram_embed(
+        document(root_media(children=children)), "Code123", "post"
+    )
+
+    assert media_type == "carousel"
+    assert [asset["id"] for asset in assets] == ["asset-1", "asset-2", "asset-3"]
+    assert [asset["order"] for asset in assets] == [1, 2, 3]
+    assert [asset["type"] for asset in assets] == ["image", "video", "image"]
+    assert assets[0]["url"] == assets[2]["url"] == first["display_url"]
+    assert assets[1]["thumbnail_url"] == children[1]["display_url"]
+
+
 def test_parser_rejects_missing_media_mismatch_and_unsafe_assets() -> None:
     missing = root_media()
     missing["display_url"] = "https://cdninstagram.com.evil.example/image.jpg"

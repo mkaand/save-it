@@ -29,15 +29,10 @@ def parse_instagram_embed(
 
     nodes = _media_nodes(media)
     assets: list[dict] = []
-    seen: set[tuple[str, str]] = set()
     for node in nodes[: settings.instagram_max_assets]:
         asset = _asset(node, len(assets) + 1)
         if asset is None:
             continue
-        identity = (asset["type"], asset["url"])
-        if identity in seen:
-            continue
-        seen.add(identity)
         assets.append(asset)
 
     if not assets:

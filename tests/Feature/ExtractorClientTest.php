@@ -281,6 +281,9 @@ class ExtractorClientTest extends TestCase
             $assets = [
                 self::instagramAsset('image', 1),
                 self::instagramAsset('video', 2),
+                self::instagramAsset('video', 3),
+                self::instagramAsset('image', 4),
+                self::instagramAsset('video', 5),
             ];
 
             return Http::response([
@@ -302,7 +305,7 @@ class ExtractorClientTest extends TestCase
                         'author_handle' => 'example.author',
                         'published_at' => '2026-07-28T12:00:00Z',
                         'thumbnail_url' => $assets[0]['thumbnail_url'],
-                        'media_count' => 2,
+                        'media_count' => 5,
                     ],
                     'assets' => $assets,
                     'capabilities' => ['metadata', 'media_assets', 'multiple_assets'],
@@ -318,18 +321,32 @@ class ExtractorClientTest extends TestCase
             ->assertJsonPath('data.media_type', 'carousel')
             ->assertJsonPath('data.url', 'https://www.instagram.com/p/Code123/')
             ->assertJsonPath('data.status', 'ready')
-            ->assertJsonCount(2, 'data.assets');
+            ->assertJsonCount(5, 'data.assets');
 
         $this->assertStringNotContainsString('extractor:8000', $response->getContent());
         foreach ($response->json('data.outputs') as $output) {
             $this->assertTrue($output['available']);
         }
-        $this->assertSame('Image 1 of 2', $response->json('data.outputs.0.label'));
+        $this->assertSame('Image 1 of 5', $response->json('data.outputs.0.label'));
         $this->assertSame('1080×1350 · secure proxy delivery', $response->json('data.outputs.0.detail'));
         $this->assertSame('asset-1', $response->json('data.outputs.0.asset_id'));
-        $this->assertSame('Video 2 of 2', $response->json('data.outputs.1.label'));
+        $this->assertSame('image', $response->json('data.outputs.0.asset_type'));
+        $this->assertSame('image/jpeg', $response->json('data.outputs.0.mime_type'));
+        $this->assertSame('Video 2 of 5', $response->json('data.outputs.1.label'));
         $this->assertSame('1080×1350 · secure proxy delivery', $response->json('data.outputs.1.detail'));
         $this->assertSame('asset-2', $response->json('data.outputs.1.asset_id'));
+        $this->assertSame('video', $response->json('data.outputs.1.asset_type'));
+        $this->assertSame('video/mp4', $response->json('data.outputs.1.mime_type'));
+        $this->assertSame('Video 3 of 5', $response->json('data.outputs.2.label'));
+        $this->assertSame('asset-3', $response->json('data.outputs.2.asset_id'));
+        $this->assertSame('Image 4 of 5', $response->json('data.outputs.3.label'));
+        $this->assertSame('asset-4', $response->json('data.outputs.3.asset_id'));
+        $this->assertSame('image', $response->json('data.outputs.3.asset_type'));
+        $this->assertSame('image/jpeg', $response->json('data.outputs.3.mime_type'));
+        $this->assertSame('Video 5 of 5', $response->json('data.outputs.4.label'));
+        $this->assertSame('asset-5', $response->json('data.outputs.4.asset_id'));
+        $this->assertSame('video', $response->json('data.outputs.4.asset_type'));
+        $this->assertSame('video/mp4', $response->json('data.outputs.4.mime_type'));
         $this->assertMatchesRegularExpression(
             '#^/api/downloads/[a-z0-9]{48}\.[a-f0-9]{64}$#',
             (string) $response->json('data.assets.0.preview_url'),
@@ -337,6 +354,30 @@ class ExtractorClientTest extends TestCase
         $this->assertMatchesRegularExpression(
             '#^/api/downloads/[a-z0-9]{48}\.[a-f0-9]{64}$#',
             (string) $response->json('data.assets.1.preview_url'),
+        );
+        $this->assertMatchesRegularExpression(
+            '#^/api/downloads/[a-z0-9]{48}\.[a-f0-9]{64}$#',
+            (string) $response->json('data.assets.2.preview_url'),
+        );
+        $this->assertMatchesRegularExpression(
+            '#^/api/downloads/[a-z0-9]{48}\.[a-f0-9]{64}$#',
+            (string) $response->json('data.assets.3.preview_url'),
+        );
+        $this->assertMatchesRegularExpression(
+            '#^/api/downloads/[a-z0-9]{48}\.[a-f0-9]{64}$#',
+            (string) $response->json('data.assets.4.preview_url'),
+        );
+        $this->assertNotSame(
+            $response->json('data.assets.0.preview_url'),
+            $response->json('data.assets.1.preview_url'),
+        );
+        $this->assertNotSame(
+            $response->json('data.assets.1.preview_url'),
+            $response->json('data.assets.2.preview_url'),
+        );
+        $this->assertNotSame(
+            $response->json('data.assets.0.preview_url'),
+            $response->json('data.assets.3.preview_url'),
         );
         $this->assertStringNotContainsString('cdninstagram.com', $response->getContent());
     }
