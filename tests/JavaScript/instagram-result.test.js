@@ -9,6 +9,8 @@ import {
 
 const imageUrl = 'https://scontent-lhr8-1.cdninstagram.com/v/image.jpg?token=temporary';
 const previewUrl = `/api/downloads/${'c'.repeat(48)}.${'d'.repeat(64)}`;
+const previewUrlTwo = `/api/downloads/${'e'.repeat(48)}.${'f'.repeat(64)}`;
+const previewUrlThree = `/api/downloads/${'a'.repeat(48)}.${'b'.repeat(64)}`;
 
 test('normalizes Instagram image and reel metadata without persistence payloads', () => {
     const assets = normalizeInstagramAssets([
@@ -68,6 +70,25 @@ test('accepts opaque same-origin persistent preview references', () => {
     assert.equal(normalizeInstagramAssets([{
         id: 'image', order: 1, type: 'image', preview_url: preview, width: 1, height: 1, variants: [],
     }])[0].thumbnailUrl, preview);
+});
+
+test('keeps mixed carousel source order and item-specific previews', () => {
+    const assets = normalizeInstagramAssets([
+        { id: 'asset-1', order: 1, type: 'image', preview_url: previewUrl, width: 1080, height: 1350, variants: [] },
+        { id: 'asset-2', order: 2, type: 'video', preview_url: previewUrlTwo, width: 1080, height: 1920, variants: [] },
+        { id: 'asset-3', order: 3, type: 'image', preview_url: previewUrlThree, width: 1080, height: 1080, variants: [] },
+    ]);
+
+    assert.deepEqual(assets.map((asset) => [asset.id, asset.order, asset.type]), [
+        ['asset-1', 1, 'image'],
+        ['asset-2', 2, 'video'],
+        ['asset-3', 3, 'image'],
+    ]);
+    assert.deepEqual(assets.map((asset) => asset.thumbnailUrl), [
+        previewUrl,
+        previewUrlTwo,
+        previewUrlThree,
+    ]);
 });
 
 test('corrupt asset data is dropped without throwing', () => {
