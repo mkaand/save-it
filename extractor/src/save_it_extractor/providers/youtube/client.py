@@ -9,7 +9,9 @@ from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
 
 from save_it_extractor.config import settings
+from save_it_extractor.domain.urls import classify_url
 from save_it_extractor.providers.errors import ProviderError
+from save_it_extractor.providers.youtube.parser import parse_youtube_metadata
 
 CANONICAL_YOUTUBE_URL = re.compile(
     r"^https://www\.youtube\.com/(?:watch\?v=[A-Za-z0-9_-]{11}|shorts/[A-Za-z0-9_-]{11})$"
@@ -40,10 +42,33 @@ class YouTubeMetadataClient:
                 {"provider": "youtube"},
             )
 
-        return await asyncio.to_thread(self._fetch_sync, canonical_url)
+        adaptive = await asyncio.to_thread(self._fetch_sync, canonical_url, "default")
+        # Android still exposes the small progressive format that keeps the
+        # established direct 360p path available. Its adaptive URLs require a
+        # PO token on current YouTube delivery, so they must not displace the
+        # anonymous default client's usable adaptive formats.
+        try:
+            progressive = await asyncio.to_thread(self._fetch_sync, canonical_url, "android")
+        except ProviderError:
+            return _tag_formats(adaptive, "default")
 
-    async def resolve_format(self, canonical_url: str, format_id: str) -> dict[str, Any]:
-        payload = await self.fetch(canonical_url)
+        return _combine_formats(adaptive, progressive)
+
+    async def resolve_format(
+        self, canonical_url: str, format_id: str, source_client: str = "android"
+    ) -> dict[str, Any]:
+        if source_client not in {"default", "android"}:
+            raise ProviderError(
+                "format_unavailable",
+                "The selected YouTube format is no longer available.",
+                410,
+                {"provider": "youtube"},
+            )
+        payload = await asyncio.to_thread(self._fetch_sync, canonical_url, source_client)
+        metadata = parse_youtube_metadata(payload, classify_url(canonical_url))
+        allowed = {
+            item["format_id"] for item in metadata["video_formats"] + metadata["audio_formats"]
+        }
         formats = payload.get("formats")
         if not isinstance(formats, list):
             raise ProviderError(
@@ -56,7 +81,9 @@ class YouTubeMetadataClient:
             (
                 item
                 for item in formats
-                if isinstance(item, dict) and item.get("format_id") == format_id
+                if isinstance(item, dict)
+                and item.get("format_id") == format_id
+                and format_id in allowed
             ),
             None,
         )
@@ -82,9 +109,11 @@ class YouTubeMetadataClient:
             "estimated_filesize": _positive_int(
                 selected.get("filesize") or selected.get("filesize_approx")
             ),
+            "video_codec": selected.get("vcodec"),
+            "audio_codec": selected.get("acodec"),
         }
 
-    def _fetch_sync(self, canonical_url: str) -> dict[str, Any]:
+    def _fetch_sync(self, canonical_url: str, source_client: str) -> dict[str, Any]:
         options: dict[str, Any] = {
             "cachedir": False,
             "cookiefile": None,
@@ -102,16 +131,14 @@ class YouTubeMetadataClient:
             "simulate": True,
             "skip_download": True,
             "socket_timeout": settings.youtube_socket_timeout_seconds,
-            # The default web clients may expose formats whose Google Video Server
-            # requests require a Proof of Origin token. We do not use credentials
-            # or PO tokens, so prefer the anonymous progressive Android client.
-            "extractor_args": {"youtube": {"player_client": ["android"]}},
             "writesubtitles": False,
             "writeautomaticsub": False,
             "writethumbnail": False,
             "js_runtimes": {},
             "remote_components": set(),
         }
+        if source_client == "android":
+            options["extractor_args"] = {"youtube": {"player_client": ["android"]}}
 
         # yt-dlp owns its metadata networking stack and does not expose a
         # per-request DNS pinning hook. Canonical input is restricted here and
@@ -140,6 +167,45 @@ class YouTubeMetadataClient:
             )
 
         return result
+
+
+def _tag_formats(payload: dict[str, Any], source_client: str) -> dict[str, Any]:
+    formats = payload.get("formats")
+    if not isinstance(formats, list):
+        return payload
+    return {
+        **payload,
+        "formats": [
+            {**item, "_save_it_source_client": source_client} if isinstance(item, dict) else item
+            for item in formats
+        ],
+    }
+
+
+def _combine_formats(adaptive: dict[str, Any], progressive: dict[str, Any]) -> dict[str, Any]:
+    tagged_adaptive = _tag_formats(adaptive, "default")
+    tagged_progressive = _tag_formats(progressive, "android")
+    base = tagged_adaptive.get("formats")
+    extra = tagged_progressive.get("formats")
+    if not isinstance(base, list) or not isinstance(extra, list):
+        return tagged_adaptive
+    existing = {
+        (item.get("format_id"), item.get("ext"), item.get("vcodec"), item.get("acodec"))
+        for item in base
+        if isinstance(item, dict)
+    }
+    # Keep only truly progressive Android formats; default-client adaptive
+    # tracks remain the authoritative high-resolution source.
+    additions = [
+        item
+        for item in extra
+        if isinstance(item, dict)
+        and item.get("vcodec") not in {None, "none"}
+        and item.get("acodec") not in {None, "none"}
+        and (item.get("format_id"), item.get("ext"), item.get("vcodec"), item.get("acodec"))
+        not in existing
+    ]
+    return {**tagged_adaptive, "formats": [*base, *additions]}
 
 
 def _safe_download_error(exception: DownloadError) -> ProviderError:
@@ -204,7 +270,7 @@ def _safe_googlevideo_url(value: Any) -> str | None:
 def _format_mime(value: dict[str, Any]) -> str | None:
     container = value.get("ext")
     vcodec = value.get("vcodec")
-    if container == "mp4":
+    if container in {"mp4", "m4a"}:
         return "audio/mp4" if vcodec in {None, "none"} else "video/mp4"
     if container == "webm":
         return "audio/webm" if vcodec in {None, "none"} else "video/webm"

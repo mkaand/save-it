@@ -289,6 +289,7 @@ async def resolve_youtube(payload: ResolveYouTubeRequest, request: Request) -> J
             source = await youtube_client.resolve_format(
                 context.normalized_url,
                 payload.format_id,
+                payload.source_client or "android",
             )
     except UrlValidationError as exception:
         return error_response(ContractError(exception.code, exception.message, 422, request_id))

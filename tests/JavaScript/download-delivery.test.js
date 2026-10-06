@@ -57,6 +57,7 @@ test('normalizes bounded progress and rejects unsafe ready links', () => {
         status: 'processing',
         stage: 'Merging',
         progress: 70,
+        size: null,
         downloadUrl: null,
         error: null,
     });

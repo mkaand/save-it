@@ -39,9 +39,9 @@ export function normalizeJobStatus(payload) {
         || typeof data !== 'object'
         || !['queued', 'processing', 'ready', 'failed'].includes(data.status)
         || typeof data.stage !== 'string'
-        || !Number.isInteger(data.progress)
-        || data.progress < 0
-        || data.progress > 100
+        || (data.progress !== null && (!Number.isInteger(data.progress)
+            || data.progress < 0
+            || data.progress > 100))
     ) {
         return null;
     }
@@ -50,6 +50,7 @@ export function normalizeJobStatus(payload) {
         status: data.status,
         stage: data.stage.slice(0, 80),
         progress: data.progress,
+        size: Number.isSafeInteger(data.size) && data.size > 0 ? data.size : null,
         downloadUrl: typeof data.download_url === 'string'
             && DOWNLOAD_PATH.test(data.download_url)
             ? data.download_url

@@ -221,9 +221,11 @@ def test_restricted_youtube_content_is_rejected(overrides: dict[str, Any], code:
 
 class FakeYoutubeDL:
     options: dict[str, Any] = {}
+    options_history: list[dict[str, Any]] = []
 
     def __init__(self, options: dict[str, Any]) -> None:
         FakeYoutubeDL.options = options
+        FakeYoutubeDL.options_history.append(options)
 
     def __enter__(self) -> "FakeYoutubeDL":
         return self
@@ -245,6 +247,7 @@ def test_client_uses_library_api_without_download_cookie_proxy_or_shell(
 
     monkeypatch.setattr(subprocess, "run", forbidden)
     monkeypatch.setattr(subprocess, "Popen", forbidden)
+    FakeYoutubeDL.options_history = []
     client = YouTubeMetadataClient(extractor_factory=FakeYoutubeDL)
     result = asyncio.run(client.fetch(f"https://www.youtube.com/watch?v={VIDEO_ID}"))
 
@@ -255,9 +258,39 @@ def test_client_uses_library_api_without_download_cookie_proxy_or_shell(
     assert FakeYoutubeDL.options["cookiefile"] is None
     assert FakeYoutubeDL.options["proxy"] == ""
     assert FakeYoutubeDL.options["allowed_extractors"] == ["Youtube"]
-    assert FakeYoutubeDL.options["extractor_args"] == {"youtube": {"player_client": ["android"]}}
+    assert "extractor_args" not in FakeYoutubeDL.options_history[0]
+    assert FakeYoutubeDL.options_history[1]["extractor_args"] == {
+        "youtube": {"player_client": ["android"]}
+    }
     assert FakeYoutubeDL.options["js_runtimes"] == {}
     assert FakeYoutubeDL.options["remote_components"] == set()
+
+
+def test_metadata_keeps_default_adaptive_tracks_and_android_progressive_track() -> None:
+    class DualSourceYoutubeDL(FakeYoutubeDL):
+        calls = 0
+
+        def extract_info(self, url: str, download: bool) -> dict[str, Any]:
+            DualSourceYoutubeDL.calls += 1
+            if DualSourceYoutubeDL.calls == 1:
+                return youtube_payload(
+                    formats=[
+                        *youtube_payload()["formats"][:1],
+                        youtube_payload()["formats"][5],
+                    ]
+                )
+            return youtube_payload(formats=[youtube_payload()["formats"][4]])
+
+    DualSourceYoutubeDL.calls = 0
+    result = asyncio.run(
+        YouTubeMetadataClient(extractor_factory=DualSourceYoutubeDL).fetch(
+            f"https://www.youtube.com/watch?v={VIDEO_ID}"
+        )
+    )
+    formats = {item["format_id"]: item for item in result["formats"]}
+
+    assert formats["399"]["_save_it_source_client"] == "default"
+    assert formats["22"]["_save_it_source_client"] == "android"
 
 
 def test_client_rejects_noncanonical_input_before_constructing_extractor() -> None:
@@ -330,3 +363,67 @@ def test_adapter_returns_ready_short_contract() -> None:
     assert result.media_type == "short_video"
     assert result.assets == []
     assert "video_formats" in result.capabilities
+
+
+def test_adaptive_4k_and_language_preference_exclude_manifest_sources() -> None:
+    payload = youtube_payload()
+    payload["formats"] += [
+        {
+            "format_id": "313",
+            "ext": "webm",
+            "vcodec": "vp9",
+            "acodec": "none",
+            "height": 2160,
+            "width": 3840,
+            "protocol": "https",
+            "dynamic_range": "SDR",
+        },
+        {
+            "format_id": "271",
+            "ext": "webm",
+            "vcodec": "vp9",
+            "acodec": "none",
+            "height": 1440,
+            "width": 2560,
+            "protocol": "https",
+        },
+        {
+            "format_id": "manifest",
+            "ext": "mp4",
+            "vcodec": "avc1",
+            "acodec": "none",
+            "height": 2160,
+            "protocol": "m3u8_native",
+        },
+        {
+            "format_id": "original",
+            "ext": "m4a",
+            "vcodec": "none",
+            "acodec": "mp4a.40.2",
+            "language": "en",
+            "language_preference": 10,
+            "abr": 80,
+        },
+    ]
+    metadata = parse_youtube_metadata(payload, classify_url(f"https://youtu.be/{VIDEO_ID}"))
+    formats = {f["format_id"]: f for f in metadata["video_formats"]}
+    assert formats["313"]["height"] == 2160
+    assert formats["271"]["height"] == 1440
+    assert formats["313"]["estimated_filesize"] is None
+    assert formats["313"]["requires_merge"] is True
+    assert "manifest" not in formats
+    assert metadata["audio_formats"][0]["format_id"] == "original"
+
+
+@pytest.mark.parametrize("restricted", [{"age_limit": 18}, {"availability": "private"}])
+def test_fresh_resolution_rechecks_public_content_policy(restricted: dict[str, Any]) -> None:
+    class Restricted(FakeYoutubeDL):
+        def extract_info(self, url: str, download: bool) -> dict[str, Any]:
+            return youtube_payload(**restricted)
+
+    with pytest.raises(ProviderError):
+        asyncio.run(
+            YouTubeMetadataClient(extractor_factory=Restricted).resolve_format(
+                f"https://www.youtube.com/watch?v={VIDEO_ID}", "137"
+            )
+        )

@@ -13,7 +13,8 @@ final class RuntimeArtifactCleanup
             return;
         }
         $cutoff = now()->subHours(2)->timestamp;
-        foreach (array_slice(File::directories($root), 0, 25) as $directory) {
+        $deleted = 0;
+        foreach (File::directories($root) as $directory) {
             $path = realpath($directory);
             if ($path === false || ! str_starts_with($path, $root.DIRECTORY_SEPARATOR)) {
                 continue;
@@ -21,6 +22,9 @@ final class RuntimeArtifactCleanup
             $mtime = filemtime($path);
             if ($mtime !== false && $mtime < $cutoff) {
                 File::deleteDirectory($path);
+                if (++$deleted >= 25) {
+                    break;
+                }
             }
         }
     }

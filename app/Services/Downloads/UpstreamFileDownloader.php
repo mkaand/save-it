@@ -16,7 +16,7 @@ final class UpstreamFileDownloader
     ) {}
 
     /** @param array<string, mixed> $asset */
-    public function download(array $asset, string $destination, int $remainingLimit): int
+    public function download(array $asset, string $destination, int $remainingLimit, ?callable $progress = null): int
     {
         $provider = $asset['provider'] ?? null;
         $url = $asset['upstream_url'] ?? null;
@@ -68,6 +68,10 @@ final class UpstreamFileDownloader
                     ? $this->contentRange($response, $written, $remainingLimit)
                     : null;
                 $expectedLength = $range['length'] ?? $this->contentLength($response);
+                $total = $range['total'] ?? ($response->status() === 200 ? $expectedLength : null);
+                if ($range !== null && $progress !== null) {
+                    $sizeHint = $range['total'];
+                }
                 if ($expectedLength !== null && $written + $expectedLength > $remainingLimit) {
                     throw new DownloadException(
                         'media_too_large',
@@ -81,6 +85,7 @@ final class UpstreamFileDownloader
                     $handle,
                     $expectedLength,
                     $remainingLimit - $written,
+                    $progress === null ? null : fn (int $bytes) => $progress($written + $bytes, $total),
                 );
                 if (
                     $response->status() === 200
@@ -224,6 +229,7 @@ final class UpstreamFileDownloader
         mixed $handle,
         ?int $expectedLength,
         int $remainingLimit,
+        ?callable $progress = null,
     ): int {
         $body = $response->toPsrResponse()->getBody();
         $written = 0;
@@ -252,8 +258,11 @@ final class UpstreamFileDownloader
                         'The prepared download exceeds the size limit.',
                     );
                 }
-                if (fwrite($handle, $chunk) === false) {
+                if (fwrite($handle, $chunk) !== strlen($chunk)) {
                     throw new DownloadException('job_failed', 500, 'The download could not be prepared.');
+                }
+                if ($progress !== null) {
+                    $progress($written);
                 }
             }
         } finally {

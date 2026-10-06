@@ -183,7 +183,9 @@ class AnalyzeEndpointTest extends TestCase
         $this->assertStringNotContainsString('APP_KEY', $content);
         $this->assertStringNotContainsString('stack', strtolower($content));
         $this->assertSame(104_857_600, $response->json('data.outputs.0.share.max_bytes'));
-        $this->assertSame(82_036_850, $response->json('data.outputs.0.share.size_bytes'));
+        $this->assertSame(82_036_850 + 3_400_000, $response->json('data.outputs.0.share.size_bytes'));
+        $this->assertSame('youtube_mux', $response->json('data.outputs.0.preparation'));
+        $this->assertTrue($response->json('data.outputs.0.share_supported'));
         $this->assertTrue($response->json('data.outputs.0.share.eligible'));
     }
 
@@ -197,7 +199,7 @@ class AnalyzeEndpointTest extends TestCase
 
         $this->assertFalse($response->json('data.outputs.0.share.eligible'));
         $this->assertSame('too_large', $response->json('data.outputs.0.share.reason'));
-        $this->assertSame(115_343_360, $response->json('data.outputs.0.share.size_bytes'));
+        $this->assertSame(115_343_360 + 3_400_000, $response->json('data.outputs.0.share.size_bytes'));
         $this->assertSame(104_857_600, $response->json('data.outputs.0.share.max_bytes'));
     }
 

@@ -8,6 +8,7 @@ use App\Services\Analytics\UsageMetrics;
 use App\Services\Downloads\DownloadAssetStore;
 use App\Services\Downloads\DownloadException;
 use App\Services\Downloads\DownloadJobStore;
+use App\Services\Downloads\YouTubePreparationStore;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -18,13 +19,14 @@ final class DownloadJobController extends Controller
         DownloadAssetStore $tokens,
         DownloadJobStore $jobs,
         UsageMetrics $metrics,
+        YouTubePreparationStore $youtube,
     ): JsonResponse {
         $validated = $request->validate([
             'token' => ['required', 'string', 'max:160'],
         ]);
 
         try {
-            $plan = $tokens->consume($validated['token']);
+            $plan = $tokens->resolve($validated['token']);
             if (! in_array($plan['mode'] ?? null, ['youtube_merge', 'youtube_mp3', 'zip', 'facebook_merge'], true)) {
                 throw new DownloadException(
                     'invalid_download_token',
@@ -32,8 +34,13 @@ final class DownloadJobController extends Controller
                     'This download link is no longer valid. Analyze the URL again.',
                 );
             }
-            $jobId = $jobs->create(['mode' => $plan['mode']]);
-            PrepareDownloadJob::dispatch($jobId, $plan);
+            if ($plan['mode'] === 'youtube_merge') {
+                $jobId = $youtube->start($validated['token'], $tokens, $jobs);
+            } else {
+                $plan = $tokens->consume($validated['token']);
+                $jobId = $jobs->create(['mode' => $plan['mode']]);
+                PrepareDownloadJob::dispatch($jobId, $plan);
+            }
             $metrics->record($request, 'job_create', true);
 
             return response()->json([

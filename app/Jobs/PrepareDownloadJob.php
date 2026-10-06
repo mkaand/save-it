@@ -6,8 +6,10 @@ use App\Services\Downloads\DownloadAssetStore;
 use App\Services\Downloads\DownloadException;
 use App\Services\Downloads\DownloadJobStore;
 use App\Services\Downloads\DownloadPipeline;
+use App\Services\Downloads\YouTubePreparationStore;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Facades\File;
 use Throwable;
 
 final class PrepareDownloadJob implements ShouldQueue
@@ -31,22 +33,29 @@ final class PrepareDownloadJob implements ShouldQueue
         $jobs->update($this->jobId, [
             'status' => 'processing',
             'stage' => 'Preparing',
-            'progress' => 5,
+            'progress' => ($this->plan['mode'] ?? null) === 'youtube_merge' ? null : 5,
         ]);
 
         try {
+            if (($this->plan['mode'] ?? null) === 'youtube_merge') {
+                app(YouTubePreparationStore::class)->assertActive($this->plan);
+            }
             $result = $pipeline->prepare(
                 $this->plan,
-                fn (string $stage, int $progress) => $jobs->update($this->jobId, [
+                fn (string $stage, ?int $progress) => $jobs->update($this->jobId, [
                     'status' => 'processing',
                     'stage' => $stage,
-                    'progress' => min(95, max(5, $progress)),
+                    'progress' => $progress === null ? null : min(100, max(0, $progress)),
                 ]),
             );
             $token = $tokens->issue([
                 'version' => 1,
                 'mode' => 'local_file',
-                ...(($this->plan['mode'] ?? null) === 'facebook_merge' ? ['provider' => 'facebook'] : []),
+                ...match ($this->plan['mode'] ?? null) {
+                    'facebook_merge' => ['provider' => 'facebook'],
+                    'youtube_merge' => ['provider' => 'youtube'],
+                    default => [],
+                },
                 ...$result,
             ]);
             $jobs->update($this->jobId, [
@@ -69,6 +78,23 @@ final class PrepareDownloadJob implements ShouldQueue
                         ? $exception->getMessage()
                         : 'The media could not be prepared.',
                 ],
+            ]);
+        } finally {
+            app(YouTubePreparationStore::class)->release($this->plan);
+        }
+    }
+
+    public function failed(?Throwable $exception): void
+    {
+        // Worker timeout/termination may bypass the pipeline's catch block.
+        $directory = $this->plan['_directory'] ?? null;
+        if (($this->plan['mode'] ?? null) === 'youtube_merge' && is_string($directory)
+            && preg_match('/^[a-f0-9]{32}$/', $directory) === 1) {
+            File::deleteDirectory(storage_path('app/private/downloads/'.$directory));
+            app(YouTubePreparationStore::class)->release($this->plan);
+            app(DownloadJobStore::class)->update($this->jobId, [
+                'status' => 'failed', 'stage' => 'Failed', 'progress' => null,
+                'error' => ['code' => 'preparation_timeout', 'message' => 'Preparation timed out. Analyze the URL again.'],
             ]);
         }
     }

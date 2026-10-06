@@ -35,6 +35,7 @@ import {
     responseJson,
 } from './download-delivery.js';
 import { canOfferMobileShare } from './mobile-share.js';
+import { canOfferYouTubeShare, prepareYouTubeDownload, prepareYouTubeShare } from './youtube-preparation.js';
 import {
     createShareSession,
     releaseOtherPreparedShares as releaseOtherShareSessions,
@@ -235,6 +236,14 @@ export function initAnalyzer() {
                 return;
             }
 
+            if (output.preparation === 'youtube_mux') {
+                const ready = await prepareYouTubeDownload(output, (state) => {
+                    detail.textContent = state.percent === null ? `${state.stage}…` : `${state.stage} · ${state.percent}%`;
+                });
+                window.location.assign(ready.downloadUrl);
+                return;
+            }
+
             detail.textContent = 'Preparing…';
             const started = await fetch(delivery.url, {
                 method: 'POST',
@@ -263,7 +272,7 @@ export function initAnalyzer() {
                 if (!state) {
                     throw new Error('The download service returned an invalid status.');
                 }
-                detail.textContent = `${state.stage} · ${state.progress}%`;
+                detail.textContent = state.progress === null ? `${state.stage}…` : `${state.stage} · ${state.progress}%`;
                 if (state.status === 'ready' && state.downloadUrl) {
                     window.location.assign(state.downloadUrl);
                     return;
@@ -454,7 +463,7 @@ export function initAnalyzer() {
             outputBody.append(button);
             const actions = element('div', 'output-actions');
             actions.append(button);
-            if (canOfferMobileShare(output)) {
+            if (canOfferMobileShare(output) || canOfferYouTubeShare(output)) {
                 const share = element('button', 'output-share', 'Share / Save');
                 const shareWrap = element('div', 'output-share-wrap');
                 const shareProgress = element('progress', 'output-share-progress');
@@ -506,6 +515,7 @@ export function initAnalyzer() {
                 };
 
                 const shareSession = createShareSession(output, {
+                    ...(output.preparation === 'youtube_mux' ? { prepare: prepareYouTubeShare } : {}),
                     onDownloadOnly: markDownloadOnly,
                     onError: (message) => setStatus(message, 'error'),
                     onState: setShareState,
