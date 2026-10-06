@@ -13,7 +13,7 @@ COPY resources ./resources
 COPY public ./public
 RUN npm run build
 
-FROM php:8.2-fpm-bookworm AS app
+FROM php:8.4-fpm-bookworm AS app
 
 ARG APP_UID=1000
 ARG APP_GID=1000

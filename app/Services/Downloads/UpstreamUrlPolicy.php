@@ -141,6 +141,9 @@ class UpstreamUrlPolicy
         if (strlen($packed) === 16 && substr($packed, 0, 12) === str_repeat("\0", 10)."\xff\xff") {
             return false;
         }
+        if (strlen($packed) === 16 && substr($packed, 0, 4) === "\x20\x01\x0d\xb8") {
+            return false;
+        }
 
         return filter_var(
             $address,

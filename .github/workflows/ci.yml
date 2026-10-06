@@ -22,10 +22,10 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
-      - name: Set up PHP 8.2
+      - name: Set up PHP 8.4
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.2'
+          php-version: '8.4'
           extensions: bcmath, mbstring, pdo_sqlite, pcntl, redis, sqlite3, zip
           coverage: none
 
