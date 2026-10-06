@@ -58,3 +58,8 @@ test('formats durations without throwing on missing data', () => {
     assert.equal(formatDuration(3723000), '1:02:03');
     assert.equal(formatDuration(null), 'Duration unavailable');
 });
+
+test('non-AVC codecs are named honestly rather than described as universally compatible', () => {
+    assert.match(youtubeVideoFormatLabel({ container: 'webm', codecFamily: 'other', codec: 'vp9', requiresMerge: true }), /vp9/);
+    assert.doesNotMatch(youtubeVideoFormatLabel({ container: 'mp4', codecFamily: 'other', codec: 'av01', requiresMerge: true }), /Compatible video/);
+});

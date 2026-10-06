@@ -10,6 +10,7 @@ final class DownloadPipeline
     public function __construct(
         private readonly UpstreamFileDownloader $downloader,
         private readonly YouTubeSourceResolver $youtube,
+        private readonly YouTubeMuxService $youtubeMux,
     ) {}
 
     /**
@@ -18,13 +19,17 @@ final class DownloadPipeline
      */
     public function prepare(array $plan, callable $progress): array
     {
-        $directory = storage_path('app/private/downloads/'.bin2hex(random_bytes(16)));
+        $identifier = $plan['_directory'] ?? bin2hex(random_bytes(16));
+        if (! is_string($identifier) || preg_match('/^[a-f0-9]{32}$/', $identifier) !== 1) {
+            throw new DownloadException('invalid_download_token', 410, 'The download plan is invalid.');
+        }
+        $directory = storage_path('app/private/downloads/'.$identifier);
         $this->ensureDiskSpace($plan);
         File::makeDirectory($directory, 0700, true);
 
         try {
             return match ($plan['mode'] ?? null) {
-                'youtube_merge' => $this->merge($plan, $directory, $progress),
+                'youtube_merge' => $this->youtubeMux->prepare($plan, $directory, $progress),
                 'facebook_merge' => $this->merge($plan, $directory, $progress),
                 'youtube_mp3' => $this->mp3($plan, $directory, $progress),
                 'zip' => $this->zip($plan, $directory, $progress),

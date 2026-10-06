@@ -255,7 +255,9 @@ def test_client_uses_library_api_without_download_cookie_proxy_or_shell(
     assert FakeYoutubeDL.options["cookiefile"] is None
     assert FakeYoutubeDL.options["proxy"] == ""
     assert FakeYoutubeDL.options["allowed_extractors"] == ["Youtube"]
-    assert FakeYoutubeDL.options["extractor_args"] == {"youtube": {"player_client": ["android"]}}
+    assert FakeYoutubeDL.options["extractor_args"] == {
+        "youtube": {"player_client": ["android", "android_vr"]}
+    }
     assert FakeYoutubeDL.options["js_runtimes"] == {}
     assert FakeYoutubeDL.options["remote_components"] == set()
 
@@ -330,3 +332,67 @@ def test_adapter_returns_ready_short_contract() -> None:
     assert result.media_type == "short_video"
     assert result.assets == []
     assert "video_formats" in result.capabilities
+
+
+def test_adaptive_4k_and_language_preference_exclude_manifest_sources() -> None:
+    payload = youtube_payload()
+    payload["formats"] += [
+        {
+            "format_id": "313",
+            "ext": "webm",
+            "vcodec": "vp9",
+            "acodec": "none",
+            "height": 2160,
+            "width": 3840,
+            "protocol": "https",
+            "dynamic_range": "SDR",
+        },
+        {
+            "format_id": "271",
+            "ext": "webm",
+            "vcodec": "vp9",
+            "acodec": "none",
+            "height": 1440,
+            "width": 2560,
+            "protocol": "https",
+        },
+        {
+            "format_id": "manifest",
+            "ext": "mp4",
+            "vcodec": "avc1",
+            "acodec": "none",
+            "height": 2160,
+            "protocol": "m3u8_native",
+        },
+        {
+            "format_id": "original",
+            "ext": "m4a",
+            "vcodec": "none",
+            "acodec": "mp4a.40.2",
+            "language": "en",
+            "language_preference": 10,
+            "abr": 80,
+        },
+    ]
+    metadata = parse_youtube_metadata(payload, classify_url(f"https://youtu.be/{VIDEO_ID}"))
+    formats = {f["format_id"]: f for f in metadata["video_formats"]}
+    assert formats["313"]["height"] == 2160
+    assert formats["271"]["height"] == 1440
+    assert formats["313"]["estimated_filesize"] is None
+    assert formats["313"]["requires_merge"] is True
+    assert "manifest" not in formats
+    assert metadata["audio_formats"][0]["format_id"] == "original"
+
+
+@pytest.mark.parametrize("restricted", [{"age_limit": 18}, {"availability": "private"}])
+def test_fresh_resolution_rechecks_public_content_policy(restricted: dict[str, Any]) -> None:
+    class Restricted(FakeYoutubeDL):
+        def extract_info(self, url: str, download: bool) -> dict[str, Any]:
+            return youtube_payload(**restricted)
+
+    with pytest.raises(ProviderError):
+        asyncio.run(
+            YouTubeMetadataClient(extractor_factory=Restricted).resolve_format(
+                f"https://www.youtube.com/watch?v={VIDEO_ID}", "137"
+            )
+        )

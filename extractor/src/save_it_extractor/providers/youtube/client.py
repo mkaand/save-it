@@ -9,7 +9,9 @@ from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
 
 from save_it_extractor.config import settings
+from save_it_extractor.domain.urls import classify_url
 from save_it_extractor.providers.errors import ProviderError
+from save_it_extractor.providers.youtube.parser import parse_youtube_metadata
 
 CANONICAL_YOUTUBE_URL = re.compile(
     r"^https://www\.youtube\.com/(?:watch\?v=[A-Za-z0-9_-]{11}|shorts/[A-Za-z0-9_-]{11})$"
@@ -44,6 +46,10 @@ class YouTubeMetadataClient:
 
     async def resolve_format(self, canonical_url: str, format_id: str) -> dict[str, Any]:
         payload = await self.fetch(canonical_url)
+        metadata = parse_youtube_metadata(payload, classify_url(canonical_url))
+        allowed = {
+            item["format_id"] for item in metadata["video_formats"] + metadata["audio_formats"]
+        }
         formats = payload.get("formats")
         if not isinstance(formats, list):
             raise ProviderError(
@@ -56,7 +62,9 @@ class YouTubeMetadataClient:
             (
                 item
                 for item in formats
-                if isinstance(item, dict) and item.get("format_id") == format_id
+                if isinstance(item, dict)
+                and item.get("format_id") == format_id
+                and format_id in allowed
             ),
             None,
         )
@@ -82,6 +90,8 @@ class YouTubeMetadataClient:
             "estimated_filesize": _positive_int(
                 selected.get("filesize") or selected.get("filesize_approx")
             ),
+            "video_codec": selected.get("vcodec"),
+            "audio_codec": selected.get("acodec"),
         }
 
     def _fetch_sync(self, canonical_url: str) -> dict[str, Any]:
@@ -102,10 +112,9 @@ class YouTubeMetadataClient:
             "simulate": True,
             "skip_download": True,
             "socket_timeout": settings.youtube_socket_timeout_seconds,
-            # The default web clients may expose formats whose Google Video Server
-            # requests require a Proof of Origin token. We do not use credentials
-            # or PO tokens, so prefer the anonymous progressive Android client.
-            "extractor_args": {"youtube": {"player_client": ["android"]}},
+            # Keep Android first for the existing progressive source; VR also
+            # exposes anonymous adaptive tracks. No cookies or PO-token bypass.
+            "extractor_args": {"youtube": {"player_client": ["android", "android_vr"]}},
             "writesubtitles": False,
             "writeautomaticsub": False,
             "writethumbnail": False,
@@ -204,7 +213,7 @@ def _safe_googlevideo_url(value: Any) -> str | None:
 def _format_mime(value: dict[str, Any]) -> str | None:
     container = value.get("ext")
     vcodec = value.get("vcodec")
-    if container == "mp4":
+    if container in {"mp4", "m4a"}:
         return "audio/mp4" if vcodec in {None, "none"} else "video/mp4"
     if container == "webm":
         return "audio/webm" if vcodec in {None, "none"} else "video/webm"

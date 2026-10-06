@@ -126,6 +126,8 @@ def _video_formats(formats: list[Any]) -> list[dict[str, Any]]:
     for raw in formats:
         if not isinstance(raw, dict) or raw.get("has_drm") is True:
             continue
+        if raw.get("protocol") not in {None, "https"}:
+            continue
         format_id = _format_id(raw.get("format_id"))
         container = _container(raw.get("ext"))
         video_codec = _codec(raw.get("vcodec"))
@@ -151,6 +153,7 @@ def _video_formats(formats: list[Any]) -> list[dict[str, Any]]:
                 "height": height,
                 "resolution": f"{width}×{height}" if width and height else None,
                 "fps": _positive_number(raw.get("fps")),
+                "dynamic_range": _clean_text(raw.get("dynamic_range"), 20),
                 "bitrate_kbps": _positive_number(raw.get("tbr") or raw.get("vbr")),
                 "estimated_filesize": _positive_int(
                     raw.get("filesize") or raw.get("filesize_approx")
@@ -179,6 +182,8 @@ def _audio_formats(formats: list[Any]) -> list[dict[str, Any]]:
     for raw in formats:
         if not isinstance(raw, dict) or raw.get("has_drm") is True:
             continue
+        if raw.get("protocol") not in {None, "https"}:
+            continue
         if _codec(raw.get("vcodec")) is not None:
             continue
         format_id = _format_id(raw.get("format_id"))
@@ -201,6 +206,7 @@ def _audio_formats(formats: list[Any]) -> list[dict[str, Any]]:
                     raw.get("filesize") or raw.get("filesize_approx")
                 ),
                 "language": _clean_text(raw.get("language"), 32),
+                "language_preference": _integer(raw.get("language_preference")) or 0,
                 "preference": 0 if container == "m4a" else 1,
             }
         )
@@ -208,6 +214,7 @@ def _audio_formats(formats: list[Any]) -> list[dict[str, Any]]:
     results.sort(
         key=lambda item: (
             item["preference"],
+            -item["language_preference"],
             -(item["bitrate_kbps"] or 0),
             item["format_id"],
         )

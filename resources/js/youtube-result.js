@@ -89,7 +89,7 @@ export function youtubeVideoFormatLabel(format) {
         ? ' · video and audio will be merged'
         : (format.hasAudio ? ' · audio included' : ' · video only');
     const codec = format.codecFamily === 'h264' ? 'H.264'
-        : (format.codecFamily === 'h265' ? 'H.265' : 'Compatible video');
+        : (format.codecFamily === 'h265' ? 'H.265' : (format.codec || 'Video'));
 
     return `${format.container.toUpperCase()} ${resolution} · ${codec}${fps}${delivery}`;
 }

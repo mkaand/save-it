@@ -46,6 +46,9 @@ final class YouTubeSourceResolver
         }
 
         $data = $response->json('data');
+        if ($response->status() === 410) {
+            throw new DownloadException('format_unavailable', 410, 'The selected source expired. Analyze the URL again.');
+        }
         if (
             ! $response->successful()
             || ! is_array($data)
@@ -56,6 +59,11 @@ final class YouTubeSourceResolver
             || ! is_string($data['url'] ?? null)
         ) {
             throw $this->unavailable();
+        }
+        foreach (['video_codec', 'audio_codec'] as $codec) {
+            if (isset($asset[$codec]) && ($data[$codec] ?? null) !== $asset[$codec]) {
+                throw new DownloadException('format_unavailable', 410, 'The selected source changed. Analyze the URL again.');
+            }
         }
 
         return [

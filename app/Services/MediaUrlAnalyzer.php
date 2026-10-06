@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\MediaPlatform;
 use App\Services\Downloads\DownloadAssetStore;
+use App\Services\Downloads\YouTubeOutputSelector;
 use App\Services\Extractor\ExtractorClient;
 use App\Services\Extractor\ExtractorException;
 use App\Services\Extractor\ExtractorRecognition;
@@ -211,17 +212,16 @@ final class MediaUrlAnalyzer
             : [];
         $outputs = [];
 
-        foreach (array_slice($videoFormats, 0, 6) as $format) {
-            if (($format['requires_merge'] ?? false) && $format['container'] !== 'mp4') {
-                continue;
-            }
+        foreach ((new YouTubeOutputSelector)->select($videoFormats, $audioFormats) as $selection) {
+            $format = $selection['video'];
+            $audio = $selection['audio'];
             $resolution = is_string($format['resolution'] ?? null)
                 ? $format['resolution']
                 : 'Video';
             $codec = match ($format['video_codec_family'] ?? 'other') {
                 'h264' => 'H.264',
                 'h265' => 'H.265',
-                default => 'Compatible video',
+                default => $format['video_codec'],
             };
             $merge = ($format['requires_merge'] ?? false)
                 ? ' · video and audio will be merged'
@@ -235,30 +235,32 @@ final class MediaUrlAnalyzer
                 'format_id' => $format['format_id'],
                 'mime_type' => $format['container'] === 'webm' ? 'video/webm' : 'video/mp4',
                 'filename' => $this->downloadFilename(
-                    (string) $metadata['title'],
+                    (string) $metadata['title'].'-'.$format['height'].'p',
                     $format['container'] === 'webm' ? 'video/webm' : 'video/mp4',
                     1,
                 ),
                 'expected_size' => $format['estimated_filesize'] ?? null,
             ];
             if ($mode === 'youtube_merge') {
-                $audio = collect($audioFormats)->firstWhere('container', 'm4a')
-                    ?? ($audioFormats[0] ?? null);
-                if (! is_array($audio)) {
-                    continue;
-                }
+                $payload['container'] = $format['container'];
+                $payload['expected_size'] = is_int($format['estimated_filesize']) && is_int($audio['estimated_filesize'])
+                    ? $format['estimated_filesize'] + $audio['estimated_filesize'] : null;
                 $payload['sources'] = [
                     [
                         'mode' => 'youtube_direct',
                         'provider' => 'youtube',
                         'normalized_url' => $recognition->normalizedUrl,
                         'format_id' => $format['format_id'],
+                        'video_codec' => $format['video_codec'],
+                        'audio_codec' => 'none',
                     ],
                     [
                         'mode' => 'youtube_direct',
                         'provider' => 'youtube',
                         'normalized_url' => $recognition->normalizedUrl,
                         'format_id' => $audio['format_id'],
+                        'video_codec' => 'none',
+                        'audio_codec' => $audio['audio_codec'],
                     ],
                 ];
             }
@@ -270,6 +272,12 @@ final class MediaUrlAnalyzer
                 'mime_type' => $payload['mime_type'],
                 'available' => true,
                 'share_size_bytes' => $payload['expected_size'],
+                ...($mode === 'youtube_merge' ? [
+                    'preparation' => 'youtube_mux',
+                    'share_supported' => $format['container'] === 'mp4'
+                        && $format['video_codec_family'] === 'h264'
+                        && str_starts_with($audio['audio_codec'], 'mp4a'),
+                ] : []),
                 ...$this->delivery($mode, $token),
             ];
         }
