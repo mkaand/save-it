@@ -544,6 +544,7 @@ final class ExtractorClient
             || ! in_array($format['video_codec_family'] ?? null, ['h264', 'h265', 'other'], true)
             || ! is_bool($format['has_audio'] ?? null)
             || ! is_bool($format['requires_merge'] ?? null)
+            || ! in_array($format['source_client'] ?? null, [null, 'default', 'android'], true)
             || ! is_int($format['preference'] ?? null)
             || $format['preference'] < 0
             || $format['preference'] > 3
@@ -553,6 +554,7 @@ final class ExtractorClient
 
         return [
             'format_id' => $format['format_id'],
+            'source_client' => $format['source_client'] ?? null,
             'container' => $format['container'],
             'video_codec' => $this->nullableString($format['video_codec'], 80),
             'video_codec_family' => $format['video_codec_family'],
@@ -584,12 +586,14 @@ final class ExtractorClient
             || ! is_string($format['audio_codec'] ?? null)
             || ! is_int($format['preference'] ?? null)
             || ! in_array($format['preference'], [0, 1], true)
+            || ! in_array($format['source_client'] ?? null, [null, 'default', 'android'], true)
         ) {
             throw $this->invalidContract($requestId);
         }
 
         return [
             'format_id' => $format['format_id'],
+            'source_client' => $format['source_client'] ?? null,
             'container' => $format['container'],
             'audio_codec' => $this->nullableString($format['audio_codec'], 80),
             'bitrate_kbps' => $this->nullablePositiveNumber($format['bitrate_kbps'] ?? null),

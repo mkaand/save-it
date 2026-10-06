@@ -191,9 +191,12 @@ def test_youtube_source_resolution_contract_is_internal_and_bounded(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class FakeResolver:
-        async def resolve_format(self, url: str, format_id: str) -> dict[str, object]:
+        async def resolve_format(
+            self, url: str, format_id: str, source_client: str
+        ) -> dict[str, object]:
             assert url == "https://www.youtube.com/watch?v=abcdefghijk"
             assert format_id == "140"
+            assert source_client == "android"
             return {
                 "url": "https://rr1---sn-example.googlevideo.com/videoplayback?expire=1",
                 "mime_type": "audio/mp4",

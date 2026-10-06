@@ -233,6 +233,7 @@ final class MediaUrlAnalyzer
                 'provider' => 'youtube',
                 'normalized_url' => $recognition->normalizedUrl,
                 'format_id' => $format['format_id'],
+                ...($format['source_client'] === null ? [] : ['source_client' => $format['source_client']]),
                 'mime_type' => $format['container'] === 'webm' ? 'video/webm' : 'video/mp4',
                 'filename' => $this->downloadFilename(
                     (string) $metadata['title'].'-'.$format['height'].'p',
@@ -251,6 +252,7 @@ final class MediaUrlAnalyzer
                         'provider' => 'youtube',
                         'normalized_url' => $recognition->normalizedUrl,
                         'format_id' => $format['format_id'],
+                        ...($format['source_client'] === null ? [] : ['source_client' => $format['source_client']]),
                         'video_codec' => $format['video_codec'],
                         'audio_codec' => 'none',
                     ],
@@ -259,6 +261,7 @@ final class MediaUrlAnalyzer
                         'provider' => 'youtube',
                         'normalized_url' => $recognition->normalizedUrl,
                         'format_id' => $audio['format_id'],
+                        ...($audio['source_client'] === null ? [] : ['source_client' => $audio['source_client']]),
                         'video_codec' => 'none',
                         'audio_codec' => $audio['audio_codec'],
                     ],

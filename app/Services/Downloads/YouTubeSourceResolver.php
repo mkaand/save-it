@@ -16,10 +16,12 @@ final class YouTubeSourceResolver
     {
         $url = $asset['normalized_url'] ?? null;
         $formatId = $asset['format_id'] ?? null;
+        $sourceClient = $asset['source_client'] ?? null;
         if (
             ! is_string($url)
             || ! is_string($formatId)
             || preg_match('/^[A-Za-z0-9._+-]{1,100}$/', $formatId) !== 1
+            || ($sourceClient !== null && ! in_array($sourceClient, ['default', 'android'], true))
         ) {
             throw new DownloadException(
                 'invalid_download_token',
@@ -39,6 +41,7 @@ final class YouTubeSourceResolver
                 ->post('/v1/youtube/resolve', [
                     'url' => $url,
                     'format_id' => $formatId,
+                    ...($sourceClient === null ? [] : ['source_client' => $sourceClient]),
                     'request_id' => $requestId,
                 ]);
         } catch (ConnectionException) {

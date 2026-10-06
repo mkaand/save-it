@@ -145,6 +145,7 @@ def _video_formats(formats: list[Any]) -> list[dict[str, Any]]:
         results.append(
             {
                 "format_id": format_id,
+                "source_client": _source_client(raw.get("_save_it_source_client")),
                 "container": container,
                 "video_codec": video_codec,
                 "video_codec_family": codec_family,
@@ -198,6 +199,7 @@ def _audio_formats(formats: list[Any]) -> list[dict[str, Any]]:
         results.append(
             {
                 "format_id": format_id,
+                "source_client": _source_client(raw.get("_save_it_source_client")),
                 "container": container,
                 "audio_codec": audio_codec,
                 "bitrate_kbps": _positive_number(raw.get("abr") or raw.get("tbr")),
@@ -220,6 +222,10 @@ def _audio_formats(formats: list[Any]) -> list[dict[str, Any]]:
         )
     )
     return results[: settings.youtube_max_audio_formats]
+
+
+def _source_client(value: Any) -> str | None:
+    return value if value in {"default", "android"} else None
 
 
 def _thumbnails(value: Any) -> list[dict[str, Any]]:

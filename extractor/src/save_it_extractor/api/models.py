@@ -31,6 +31,7 @@ class ResolveYouTubeRequest(BaseModel):
         max_length=100,
         pattern=r"^[A-Za-z0-9._+-]+$",
     )
+    source_client: Literal["default", "android"] | None = None
     request_id: str | None = Field(
         default=None,
         min_length=1,

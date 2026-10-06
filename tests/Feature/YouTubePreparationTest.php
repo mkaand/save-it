@@ -230,6 +230,34 @@ class YouTubePreparationTest extends TestCase
         }
     }
 
+    public function test_source_client_is_forwarded_with_the_signed_youtube_track_plan(): void
+    {
+        $plan = $this->plan();
+        $plan['sources'][0]['source_client'] = 'default';
+        $plan['sources'][1]['source_client'] = 'default';
+        Http::fake(function ($request) use ($plan) {
+            if (str_ends_with($request->url(), '/v1/youtube/resolve')) {
+                $this->assertSame('default', $request['source_client']);
+                $id = $request['format_id'];
+                $source = $plan['sources'][$id === '137' ? 0 : 1];
+
+                return Http::response(['data' => [
+                    ...$source, 'request_id' => $request['request_id'],
+                    'url' => 'https://rr1.googlevideo.com/'.$id,
+                    'mime_type' => $id === '137' ? 'video/mp4' : 'audio/mp4',
+                ]]);
+            }
+
+            return Http::response('', 503);
+        });
+        try {
+            app(DownloadPipeline::class)->prepare($plan, fn () => null);
+            $this->fail('Invalid sources must not produce an artifact.');
+        } catch (DownloadException $exception) {
+            $this->assertSame('upstream_unavailable', $exception->publicCode);
+        }
+    }
+
     public function test_ready_youtube_artifact_survives_repeated_range_access_until_token_expiry(): void
     {
         $plan = $this->plan();
