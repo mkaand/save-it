@@ -13,7 +13,7 @@ COPY resources ./resources
 COPY public ./public
 RUN npm run build
 
-FROM php:8.4-fpm-bookworm AS app
+FROM php:8.4.27-fpm-bookworm@sha256:df5a5113e1179ddf4560cd15727eb3812f6457829756d2a96c6c11bb4c250089 AS app
 
 ARG APP_UID=1000
 ARG APP_GID=1000
@@ -25,7 +25,7 @@ RUN apt-get update \
         gosu \
         libzip-dev \
         unzip \
-    && docker-php-ext-install -j"$(nproc)" \
+    && docker-php-ext-install -j1 \
         bcmath \
         pcntl \
         zip \

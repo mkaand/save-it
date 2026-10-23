@@ -8,6 +8,7 @@ node_modules
 extractor
 database/*.sqlite*
 storage/logs/*
+storage/app/private/**
 storage/framework/cache/data/*
 storage/framework/sessions/*
 storage/framework/views/*
