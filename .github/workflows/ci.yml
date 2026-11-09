@@ -29,6 +29,18 @@ jobs:
           extensions: bcmath, mbstring, pdo_sqlite, pcntl, redis, sqlite3, zip
           coverage: none
 
+      # Temporary Composer lock regeneration to produce a reproducible
+      # security patch from the actual dependency solver. Replaced with the
+      # committed lock in the final PR.
+      - name: Regenerate security-only Symfony lock for review
+        run: |
+          composer update symfony/http-foundation symfony/http-kernel symfony/mime symfony/routing symfony/yaml --with-all-dependencies --no-install --no-scripts --no-progress --no-interaction
+          composer audit
+          git diff --check
+          echo 'SAVE_IT_COMPOSER_PATCH_BEGIN'
+          git -c color.ui=false diff --no-ext-diff -- composer.lock
+          echo 'SAVE_IT_COMPOSER_PATCH_END'
+
       - name: Install PHP dependencies
         run: composer install --no-interaction --prefer-dist --no-progress
 
