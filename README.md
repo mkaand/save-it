@@ -3,7 +3,8 @@
 Save It is a privacy-conscious media URL analysis experience built with Laravel 12 and PHP 8.2.
 
 See the portable [installation guide](docs/installation.md), [upgrade and rollback
-guide](docs/upgrade-and-rollback.md), and [provider regression matrix](docs/provider-regression-matrix.md).
+guide](docs/upgrade-and-rollback.md), optional [immutable GHCR deployment](docs/ghcr-deployment.md),
+and [provider regression matrix](docs/provider-regression-matrix.md).
 
 PR #9 adds production LinkedIn public-media parsing, short-lived signed download
 references, Range-aware proxy streaming, queue-backed YouTube merge and audio

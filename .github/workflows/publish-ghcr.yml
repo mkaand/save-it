@@ -1,0 +1,94 @@
+name: Publish immutable GHCR images
+
+# Publish only a successful main-branch push that passed the existing CI,
+# including composer audit, frontend/Python checks and Docker smoke tests.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ghcr-release-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out the exact CI-tested commit
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish application image
+        id: app
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./docker/php/Dockerfile
+          target: app
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/mkaand/save-it-app:sha-${{ github.event.workflow_run.head_sha }}
+
+      - name: Publish Nginx image
+        id: nginx
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./docker/php/Dockerfile
+          target: nginx
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/mkaand/save-it-nginx:sha-${{ github.event.workflow_run.head_sha }}
+
+      - name: Publish extractor image
+        id: extractor
+        uses: docker/build-push-action@v6
+        with:
+          context: ./extractor
+          file: ./extractor/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/mkaand/save-it-extractor:sha-${{ github.event.workflow_run.head_sha }}
+
+      - name: Record immutable image digests
+        env:
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+          APP_DIGEST: ${{ steps.app.outputs.digest }}
+          NGINX_DIGEST: ${{ steps.nginx.outputs.digest }}
+          EXTRACTOR_DIGEST: ${{ steps.extractor.outputs.digest }}
+        run: |
+          {
+            echo "### Save It GHCR release"
+            echo
+            echo "Source commit: \`$RELEASE_SHA\`"
+            echo
+            echo "| Image | Immutable digest |"
+            echo "| --- | --- |"
+            echo "| \`ghcr.io/mkaand/save-it-app\` | \`$APP_DIGEST\` |"
+            echo "| \`ghcr.io/mkaand/save-it-nginx\` | \`$NGINX_DIGEST\` |"
+            echo "| \`ghcr.io/mkaand/save-it-extractor\` | \`$EXTRACTOR_DIGEST\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
