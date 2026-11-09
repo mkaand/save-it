@@ -115,6 +115,39 @@ jobs:
         working-directory: extractor
         run: PYTHONPATH=src python -c "from save_it_extractor.main import app; assert app.title == 'Save It Extractor'"
 
+  ghcr-compose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Validate GHCR-only production overlay
+        env:
+          SAVE_IT_APP_DIGEST: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          SAVE_IT_NGINX_DIGEST: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+          SAVE_IT_EXTRACTOR_DIGEST: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.ghcr.yml config --format json > /tmp/save-it-ghcr-compose.json
+          python3 - <<'PY'
+          import json
+          with open("/tmp/save-it-ghcr-compose.json", encoding="utf-8") as file:
+              data = json.load(file)
+          services = data["services"]
+          for name in ("app", "worker", "scheduler", "nginx", "extractor"):
+              assert "build" not in services[name], f"{name} must not build on the VPS"
+              assert services[name]["image"].startswith("ghcr.io/mkaand/save-it-"), name
+          expected_app = services["app"]["image"]
+          assert services["worker"]["image"] == expected_app
+          assert services["scheduler"]["image"] == expected_app
+          for name in ("app", "worker", "scheduler", "nginx", "extractor", "redis"):
+              assert services[name].get("labels", {}).get("diun.enable") == "false", name
+          assert services["redis"]["volumes"][0]["source"] == "media-downloader-redis-data"
+          assert any(v["source"].endswith("/database") for v in services["app"]["volumes"])
+          assert any(v["source"].endswith("/storage") for v in services["app"]["volumes"])
+          PY
+
   docker:
     needs: [php, frontend, python]
     runs-on: ubuntu-24.04
