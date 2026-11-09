@@ -1,0 +1,38 @@
+# Optional production-only overlay. Keep docker-compose.yml usable for local builds.
+# Use with --env-file .env --env-file .env.ghcr and BOTH -f files.
+# Docker Compose 2.24.4+ is required for !reset.
+# Each digest must be the exact sha256:... digest from a successful GHCR publish.
+services:
+  app:
+    build: !reset null
+    image: ghcr.io/mkaand/save-it-app@${SAVE_IT_APP_DIGEST:?Set SAVE_IT_APP_DIGEST to an immutable sha256 digest}
+    labels:
+      diun.enable: "false"
+
+  worker:
+    build: !reset null
+    image: ghcr.io/mkaand/save-it-app@${SAVE_IT_APP_DIGEST:?Set SAVE_IT_APP_DIGEST to an immutable sha256 digest}
+    labels:
+      diun.enable: "false"
+
+  scheduler:
+    build: !reset null
+    image: ghcr.io/mkaand/save-it-app@${SAVE_IT_APP_DIGEST:?Set SAVE_IT_APP_DIGEST to an immutable sha256 digest}
+    labels:
+      diun.enable: "false"
+
+  nginx:
+    build: !reset null
+    image: ghcr.io/mkaand/save-it-nginx@${SAVE_IT_NGINX_DIGEST:?Set SAVE_IT_NGINX_DIGEST to an immutable sha256 digest}
+    labels:
+      diun.enable: "false"
+
+  extractor:
+    build: !reset null
+    image: ghcr.io/mkaand/save-it-extractor@${SAVE_IT_EXTRACTOR_DIGEST:?Set SAVE_IT_EXTRACTOR_DIGEST to an immutable sha256 digest}
+    labels:
+      diun.enable: "false"
+
+  redis:
+    labels:
+      diun.enable: "false"
