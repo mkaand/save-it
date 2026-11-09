@@ -34,8 +34,8 @@ jobs:
       # committed lock in the final PR.
       - name: Regenerate security-only Symfony lock for review
         run: |
-          composer update symfony/http-foundation symfony/http-kernel symfony/mime symfony/routing symfony/yaml --with-all-dependencies --no-install --no-scripts --no-progress --no-interaction
-          composer audit
+          composer update 'symfony/http-foundation:^7.4' 'symfony/http-kernel:^7.4' 'symfony/mime:^7.4' 'symfony/routing:^7.4' 'symfony/yaml:^7.4' 'symfony/event-dispatcher:^7.4' --with-all-dependencies --no-install --no-scripts --no-progress --no-interaction
+          composer audit --locked
           git diff --check
           echo 'SAVE_IT_COMPOSER_PATCH_BEGIN'
           git -c color.ui=false diff --no-ext-diff -- composer.lock
