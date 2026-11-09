@@ -7,6 +7,8 @@ x-app-service: &app-service
     target: app
   image: media-downloader-app:local
   restart: unless-stopped
+  labels:
+    diun.enable: "false"
   env_file:
     - path: .env
       required: false
@@ -63,6 +65,8 @@ services:
     image: media-downloader-extractor:local
     container_name: media-downloader-extractor
     restart: unless-stopped
+    labels:
+      diun.enable: "false"
     environment:
       EXTRACTOR_APP_NAME: "${EXTRACTOR_APP_NAME:-save-it-extractor}"
       EXTRACTOR_ENV: "${EXTRACTOR_ENV:-production}"
@@ -105,6 +109,8 @@ services:
     image: media-downloader-nginx:local
     container_name: media-downloader-nginx
     restart: unless-stopped
+    labels:
+      diun.enable: "false"
     ports:
       - "127.0.0.1:8099:80"
     networks:
@@ -125,6 +131,8 @@ services:
     image: redis:7.4-alpine
     container_name: media-downloader-redis
     restart: unless-stopped
+    labels:
+      diun.enable: "false"
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis-data:/data
