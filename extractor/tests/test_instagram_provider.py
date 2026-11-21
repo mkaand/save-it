@@ -47,12 +47,14 @@ def document(root: dict[str, Any]) -> str:
 def canonical_document(
     *,
     shortcode: str = "Code123",
+    kind: str = "p",
     image: str = IMAGE,
     medium: str | None = "image",
     video: str | None = None,
     state_shortcode: str | None = None,
     state_media_type: int = 1,
     state_image: str = ORIGINAL_IMAGE,
+    video_versions: list[dict[str, Any]] | None = None,
     include_state: bool = True,
 ) -> str:
     medium_meta = f'<meta name="medium" content="{medium}">' if medium else ""
@@ -75,6 +77,7 @@ def canonical_document(
                                     {"url": image},
                                 ]
                             },
+                            "video_versions": video_versions,
                         }
                     }
                 }
@@ -82,7 +85,7 @@ def canonical_document(
             + "</script>"
         )
     return f'''<!doctype html>
-<meta property="og:url" content="https://www.instagram.com/example/p/{shortcode}/">
+<meta property="og:url" content="https://www.instagram.com/{kind}/{shortcode}/">
 <meta property="og:image" content="{image}?token=one&amp;other=two">
 {medium_meta}
 {video_meta}
@@ -251,6 +254,54 @@ def test_canonical_page_parser_uses_verified_full_size_structured_image() -> Non
     assert assets[0]["width"] == 1560
     assert assets[0]["height"] == 2080
     assert "&amp;" not in assets[0]["url"]
+
+
+def test_canonical_reel_fallback_uses_verified_video_versions() -> None:
+    low = VIDEO.replace("video.mp4", "low.mp4")
+    high = VIDEO.replace("video.mp4", "high.mp4")
+    metadata, assets, media_type = parse_instagram_canonical_page(
+        canonical_document(
+            kind="reel",
+            state_media_type=2,
+            video_versions=[
+                {"url": low, "width": 360, "height": 640},
+                {"url": high, "width": 720, "height": 1280},
+            ],
+        ),
+        "Code123",
+        "reel",
+    )
+
+    assert media_type == "reel"
+    assert metadata["thumbnail_url"] == IMAGE + "?token=one&other=two"
+    assert assets[0]["type"] == "video"
+    assert assets[0]["url"] == high
+    assert assets[0]["thumbnail_url"] == IMAGE + "?token=one&other=two"
+    assert assets[0]["width"] == 720
+    assert assets[0]["height"] == 1280
+    assert [variant["url"] for variant in assets[0]["variants"]] == [high, low]
+    assert [variant["is_preferred"] for variant in assets[0]["variants"]] == [True, False]
+
+
+@pytest.mark.parametrize(
+    "document_body",
+    [
+        canonical_document(kind="reel", state_shortcode="Other123", state_media_type=2),
+        canonical_document(
+            kind="reel",
+            state_media_type=2,
+            video_versions=[{"url": "https://cdninstagram.com.evil.example/video.mp4"}],
+        ),
+        canonical_document(kind="reel", state_media_type=2, video_versions=[]),
+        canonical_document(kind="reel", state_media_type=2, include_state=False),
+    ],
+)
+def test_canonical_reel_fallback_rejects_unverified_or_thumbnail_only_video(
+    document_body: str,
+) -> None:
+    with pytest.raises(ProviderError) as rejected:
+        parse_instagram_canonical_page(document_body, "Code123", "reel")
+    assert rejected.value.code == "provider_response_changed"
 
 
 @pytest.mark.parametrize(
