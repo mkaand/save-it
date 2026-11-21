@@ -75,6 +75,39 @@ def parse_instagram_canonical_page(
     metadata, state_documents = _canonical_page_data(document)
     _validate_canonical_identity(metadata.get("og:url"), expected_shortcode, requested_kind)
 
+    if requested_kind == "reel":
+        source, width, height, variants = _canonical_reel_source(
+            state_documents, expected_shortcode
+        )
+        thumbnail = _safe_url(metadata.get("og:image"))
+        asset = {
+            "id": "asset-1",
+            "order": 1,
+            "type": "video",
+            "role": "primary",
+            "url": source,
+            "thumbnail_url": thumbnail,
+            "mime_type": "video/mp4",
+            "width": width,
+            "height": height,
+            "duration_ms": None,
+            "alt_text": _clean_text(metadata.get("og:title"), 500),
+            "variants": variants,
+        }
+        return (
+            {
+                "post_id": expected_shortcode,
+                "caption": _clean_text(metadata.get("og:description"), 500),
+                "author_name": None,
+                "author_handle": None,
+                "published_at": None,
+                "thumbnail_url": thumbnail,
+                "media_count": 1,
+            },
+            [asset],
+            "reel",
+        )
+
     if (
         requested_kind != "p"
         or metadata.get("medium") != "image"
@@ -238,6 +271,59 @@ def _canonical_image_source(
     raise ProviderError(
         "provider_response_changed",
         "Instagram canonical metadata does not contain a verified full-size image.",
+        502,
+    )
+
+
+def _canonical_reel_source(
+    state_documents: list[str], expected_shortcode: str
+) -> tuple[str, int, int, list[dict]]:
+    for document in state_documents:
+        try:
+            state = json.loads(document)
+        except json.JSONDecodeError:
+            continue
+        for node in _json_objects(state):
+            if node.get("code") != expected_shortcode or node.get("media_type") != 2:
+                continue
+            width = _positive_int(node.get("original_width"))
+            height = _positive_int(node.get("original_height"))
+            versions = node.get("video_versions")
+            if width is None or height is None or not isinstance(versions, list):
+                continue
+            candidates: list[dict] = []
+            for version in versions:
+                if not isinstance(version, dict):
+                    continue
+                source = _safe_url(version.get("url"))
+                if source is None:
+                    continue
+                variant_width = _positive_int(version.get("width")) or width
+                variant_height = _positive_int(version.get("height")) or height
+                candidates.append(
+                    {
+                        "url": source,
+                        "mime_type": "video/mp4",
+                        "protocol": "https",
+                        "bitrate": _positive_int(version.get("bitrate")),
+                        "width": variant_width,
+                        "height": variant_height,
+                        "quality_label": f"{variant_width}×{variant_height}",
+                    }
+                )
+            if not candidates:
+                continue
+            candidates.sort(
+                key=lambda candidate: candidate["width"] * candidate["height"], reverse=True
+            )
+            for index, candidate in enumerate(candidates):
+                candidate["is_preferred"] = index == 0
+            preferred = candidates[0]
+            return preferred["url"], preferred["width"], preferred["height"], candidates
+
+    raise ProviderError(
+        "provider_response_changed",
+        "Instagram canonical metadata does not contain a verified reel video.",
         502,
     )
 
